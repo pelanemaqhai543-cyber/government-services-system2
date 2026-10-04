@@ -1,46 +1,12 @@
-const bcrypt = require('bcryptjs');
-const jwt = require('jsonwebtoken');
-const db = require('../config/db');
-require('dotenv').config();
-
-exports.register = async (req, res) => {
-  const { national_id, password, full_name, email, phone, role } = req.body;
-
-  if (!national_id || !password || !full_name) {
-    return res.status(400).json({ message: 'National ID, password, and full name are required' });
-  }
-
-  try {
-    const [existing] = await db.query('SELECT id FROM users WHERE national_id = ?', [national_id]);
-    if (existing.length > 0) {
-      return res.status(409).json({ message: 'National ID already registered' });
-    }
-
-    const hashed = await bcrypt.hash(password, 10);
-    const assignedRole = role || 'citizen';
-
-    const [result] = await db.query(
-      'INSERT INTO users (national_id, password, full_name, email, phone, role) VALUES (?, ?, ?, ?, ?, ?)',
-      [national_id, hashed, full_name, email || null, phone || null, assignedRole]
-    );
-
-    // Create citizen profile if citizen
-    if (assignedRole === 'citizen') {
-      await db.query(
-        'INSERT INTO citizen_profiles (user_id, verification_status) VALUES (?, ?)',
-        [result.insertId, 'pending']
-      );
-    }
-
-    res.status(201).json({ message: 'Registration successful', userId: result.insertId });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error during registration' });
-  }
-};
-
 exports.login = async (req, res) => {
   const { national_id, password } = req.body;
+
+  console.log('\n═══════════════════════════════════════');
+  console.log('🔐 LOGIN ATTEMPT');
+  console.log('   national_id:', national_id);
+  console.log('   password length:', password?.length);
+  console.log('   DB_NAME:', process.env.DB_NAME);
+  console.log('   DB_HOST:', process.env.DB_HOST);
 
   if (!national_id || !password) {
     return res.status(400).json({ message: 'National ID and password required' });
@@ -48,12 +14,24 @@ exports.login = async (req, res) => {
 
   try {
     const [rows] = await db.query('SELECT * FROM users WHERE national_id = ?', [national_id]);
+    console.log('   Rows found:', rows.length);
+
     if (rows.length === 0) {
+      const [all] = await db.query('SELECT national_id, role FROM users LIMIT 20');
+      console.log('   All users in DB:', JSON.stringify(all, null, 2));
+      console.log('═══════════════════════════════════════\n');
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
     const user = rows[0];
+    console.log('   User found:', user.full_name, '| role:', user.role);
+    console.log('   Hash preview:', user.password?.slice(0, 15));
+    console.log('   Hash length:', user.password?.length);
+
     const match = await bcrypt.compare(password, user.password);
+    console.log('   bcrypt match:', match);
+    console.log('═══════════════════════════════════════\n');
+
     if (!match) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -75,7 +53,8 @@ exports.login = async (req, res) => {
       }
     });
   } catch (err) {
-    console.error(err);
+    console.error('   ❌ Login error:', err);
+    console.log('═══════════════════════════════════════\n');
     res.status(500).json({ message: 'Server error during login' });
   }
 };
