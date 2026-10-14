@@ -1,0 +1,3 @@
+[33m834413a[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m Frontend: 13-digit IDs, Home Affairs services, auto-verify, death reporting, picture lock
+[33mfd10199[m Backend v2: auto-verify, death tracking, picture lock, 13-digit IDs
+[33ma39aee5[m Better login error messages with icons and specific codes
