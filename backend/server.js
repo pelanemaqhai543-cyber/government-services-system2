@@ -6,6 +6,7 @@ const authRoutes = require('./routes/authRoutes');
 const citizenRoutes = require('./routes/citizenRoutes');
 const requestRoutes = require('./routes/requestRoutes');
 const employeeRoutes = require('./routes/employeeRoutes');
+const applicationRoutes = require('./routes/applicationRoutes');  // ← NEW
 
 const app = express();
 
@@ -22,15 +23,12 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
 
-    // Allow any Vercel preview URL (*.vercel.app)
     if (/\.vercel\.app$/.test(origin)) {
       return callback(null, true);
     }
 
-    // Allow explicit list
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
@@ -42,10 +40,14 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(express.json());
+/* ============================================================
+   BODY PARSERS — larger limit for base64 file uploads
+============================================================ */
+app.use(express.json({ limit: '25mb' }));                        // ← UPDATED
+app.use(express.urlencoded({ limit: '25mb', extended: true })); // ← NEW
 
 /* ============================================================
-   HEALTH CHECK — used by Render + Vercel to verify backend is up
+   HEALTH CHECK
 ============================================================ */
 app.get('/', (req, res) => {
   res.json({
@@ -63,6 +65,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/citizen', citizenRoutes);
 app.use('/api/requests', requestRoutes);
 app.use('/api/employee', employeeRoutes);
+app.use('/api/applications', applicationRoutes);                 // ← NEW
 
 /* ============================================================
    404 HANDLER
@@ -87,7 +90,6 @@ app.use((err, req, res, next) => {
 
 /* ============================================================
    SERVER START
-   Render requires binding to 0.0.0.0 for external access
 ============================================================ */
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {

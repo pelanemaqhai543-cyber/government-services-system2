@@ -6,9 +6,11 @@ const db = require('../config/db');
 exports.getProfile = async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT u.id, u.national_id, u.full_name, u.email, u.phone, u.role,
-              u.status, u.picture_url, u.picture_locked_until,
-              cp.date_of_birth, cp.gender, cp.address, cp.district,
+      `SELECT u.id, u.national_id, u.username, u.account_type,
+              u.full_name, u.email, u.phone, u.role,
+              u.status, u.picture_data,
+              (u.picture_data IS NOT NULL AND u.picture_data <> '') AS picture_locked,
+              u.date_of_birth, u.gender,
               cp.verification_status
        FROM users u
        LEFT JOIN citizen_profiles cp ON cp.user_id = u.id
@@ -19,7 +21,7 @@ exports.getProfile = async (req, res) => {
     res.json(rows[0]);
   } catch (err) {
     console.error('getProfile error:', err);
-    res.status(500).json({ message: 'Error fetching profile' });
+    res.status(500).json({ message: 'Error fetching profile: ' + err.message });
   }
 };
 
@@ -54,7 +56,6 @@ exports.markNotificationRead = async (req, res) => {
 
 /* ============================================================
    LEGACY: Home Affairs verification
-   Kept so citizenRoutes.js doesn't crash — not actively used.
 ============================================================ */
 exports.getPendingVerifications = async (req, res) => {
   try {
@@ -98,9 +99,10 @@ exports.verifyCitizen = async (req, res) => {
 exports.getAllCitizens = async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT u.id, u.national_id, u.full_name, u.email, u.phone,
+      `SELECT u.id, u.national_id, u.username, u.account_type,
+              u.full_name, u.email, u.phone,
               u.status, u.created_at,
-              cp.date_of_birth, cp.gender, cp.address, cp.district,
+              u.date_of_birth, u.gender,
               cp.verification_status
        FROM users u
        LEFT JOIN citizen_profiles cp ON cp.user_id = u.id
@@ -117,9 +119,6 @@ exports.getAllCitizens = async (req, res) => {
 
 /* ============================================================
    Report a citizen as deceased
-   - marks user as deceased
-   - cancels active requests
-   - logs a cross-department event
 ============================================================ */
 exports.reportDeath = async (req, res) => {
   const { national_id, reason } = req.body;
@@ -173,7 +172,7 @@ exports.reportDeath = async (req, res) => {
       [citizen.id]
     );
 
-    // 3. Notify the citizen's account (audit trail)
+    // 3. Notify the citizen account (audit trail)
     await db.query(
       'INSERT INTO notifications (user_id, message) VALUES (?, ?)',
       [citizen.id, `Account marked as deceased on ${new Date().toLocaleDateString()}. All active requests cancelled.`]
@@ -218,69 +217,75 @@ exports.reportDeath = async (req, res) => {
 };
 
 /* ============================================================
-   Change profile picture (restricted — 180-day lock)
+   Set profile picture — ONE TIME ONLY
+   Once set, it can never be changed from the portal.
 ============================================================ */
 exports.updateProfilePicture = async (req, res) => {
-  const { picture_url, reason } = req.body;
+  const { picture_url } = req.body;
 
-  if (!picture_url) {
+  if (typeof picture_url !== 'string' || !picture_url.trim()) {
     return res.status(400).json({
       error: 'MISSING_PICTURE',
-      message: 'Picture URL is required.'
+      message: 'Picture data is required.'
     });
   }
 
-  if (!reason || reason.trim().length < 10) {
-    return res.status(400).json({
-      error: 'MISSING_REASON',
-      message: 'Please provide a valid reason (at least 10 characters) for changing your picture.'
+  // Keep large base64 payloads from filling the database unexpectedly.
+  if (picture_url.length > 8 * 1024 * 1024) {
+    return res.status(413).json({
+      error: 'PICTURE_TOO_LARGE',
+      message: 'Picture data is too large. Please choose an image under 5MB.'
     });
   }
 
   try {
-    const [rows] = await db.query(
-      'SELECT id, picture_url, picture_locked_until FROM users WHERE id = ?',
-      [req.user.id]
+    // The condition in this UPDATE is the security rule. It makes the
+    // first upload atomic and prevents two simultaneous requests from
+    // replacing or overwriting the saved picture.
+    const [result] = await db.query(
+      `UPDATE users
+       SET picture_data = ?
+       WHERE id = ?
+         AND (picture_data IS NULL OR picture_data = '')`,
+      [picture_url.trim(), req.user.id]
     );
 
-    if (rows.length === 0) {
-      return res.status(404).json({ message: 'User not found' });
-    }
-
-    const user = rows[0];
-
-    // Enforce 180-day lock
-    if (user.picture_locked_until && new Date(user.picture_locked_until) > new Date()) {
-      const daysLeft = Math.ceil(
-        (new Date(user.picture_locked_until) - new Date()) / (1000 * 60 * 60 * 24)
+    if (result.affectedRows === 0) {
+      const [users] = await db.query(
+        'SELECT id, picture_data FROM users WHERE id = ?',
+        [req.user.id]
       );
-      return res.status(429).json({
-        error: 'PICTURE_LOCKED',
-        message: `You cannot change your profile picture yet. You can change it in ${daysLeft} day(s). Please visit Home Affairs for urgent cases.`
+
+      if (users.length === 0) {
+        return res.status(404).json({
+          error: 'USER_NOT_FOUND',
+          message: 'User not found.'
+        });
+      }
+
+      return res.status(409).json({
+        error: 'PICTURE_ALREADY_SET',
+        message: 'Your profile picture has already been set and cannot be changed through the portal.'
       });
     }
 
     await db.query(
-      `UPDATE users
-       SET picture_url = ?,
-           picture_locked_until = DATE_ADD(NOW(), INTERVAL 180 DAY)
-       WHERE id = ?`,
-      [picture_url, req.user.id]
+      `INSERT INTO change_log
+       (user_id, field_changed, old_value, new_value, changed_by, reason)
+       VALUES (?, 'picture_data', NULL, '[base64 image set]', ?, 'Initial profile picture upload')`,
+      [req.user.id, req.user.id]
     );
 
-    await db.query(
-      `INSERT INTO change_log (user_id, field_changed, old_value, new_value, changed_by, reason)
-       VALUES (?, 'picture_url', ?, ?, ?, ?)`,
-      [req.user.id, user.picture_url || null, picture_url, req.user.id, reason.trim()]
-    );
-
-    res.json({
-      message: 'Profile picture updated. You can change it again in 180 days.',
-      locked_until: new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString()
+    return res.status(201).json({
+      picture_locked: true,
+      message: 'Profile picture saved. It cannot be changed again through the portal.'
     });
   } catch (err) {
     console.error('updateProfilePicture error:', err);
-    res.status(500).json({ message: 'Error updating profile picture' });
+    return res.status(500).json({
+      error: 'PICTURE_SAVE_FAILED',
+      message: 'Error saving profile picture.'
+    });
   }
 };
 

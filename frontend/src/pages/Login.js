@@ -6,9 +6,6 @@ import { useAuth } from '../context/AuthContext';
 const PAGE_BACKGROUND = '/images/bg1.jfif';
 const LESOTHO_LOGO = '/images/lesotho2.jfif';
 
-/* ============================================================
-   ICONS
-============================================================ */
 const Icon = ({ name, size = 19 }) => {
   const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true };
   const paths = {
@@ -26,9 +23,6 @@ const Icon = ({ name, size = 19 }) => {
   return <svg {...common}>{paths[name]}</svg>;
 };
 
-/* ============================================================
-   LOGO
-============================================================ */
 const Logo = () => (
   <div className="brand">
     <span className="brand__mark"><img src={LESOTHO_LOGO} alt="" /></span>
@@ -36,18 +30,16 @@ const Logo = () => (
   </div>
 );
 
-/* ============================================================
-   ERROR MESSAGE MAPPER — decides icon + style per error
-============================================================ */
 const getErrorMeta = (code) => {
   const map = {
     MISSING_FIELDS: { type: 'warning', icon: 'warning' },
     MISSING_NATIONAL_ID: { type: 'warning', icon: 'warning' },
     MISSING_PASSWORD: { type: 'warning', icon: 'warning' },
+    INVALID_NATIONAL_ID_FORMAT: { type: 'warning', icon: 'warning' },
     USER_NOT_FOUND: { type: 'error', icon: 'alert' },
     INVALID_PASSWORD: { type: 'error', icon: 'alert' },
-    ACCOUNT_PENDING: { type: 'info', icon: 'info' },
-    ACCOUNT_REJECTED: { type: 'error', icon: 'alert' },
+    ACCOUNT_DECEASED: { type: 'error', icon: 'alert' },
+    ACCOUNT_SUSPENDED: { type: 'error', icon: 'alert' },
     DB_UNAVAILABLE: { type: 'warning', icon: 'warning' },
     SERVER_ERROR: { type: 'error', icon: 'alert' },
     NETWORK_ERROR: { type: 'warning', icon: 'warning' },
@@ -55,11 +47,8 @@ const getErrorMeta = (code) => {
   return map[code] || { type: 'error', icon: 'alert' };
 };
 
-/* ============================================================
-   COMPONENT
-============================================================ */
 const Login = () => {
-  const [form, setForm] = useState({ national_id: '', password: '' });
+  const [form, setForm] = useState({ identifier: '', password: '' });
   const [error, setError] = useState({ code: '', message: '' });
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
@@ -74,26 +63,16 @@ const Login = () => {
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    // ---- Client-side validation ----
-    if (!form.national_id && !form.password) {
-      setError({
-        code: 'MISSING_FIELDS',
-        message: 'Please enter both your National ID and password.'
-      });
+    if (!form.identifier && !form.password) {
+      setError({ code: 'MISSING_FIELDS', message: 'Please enter your ID, username, or email and your password.' });
       return;
     }
-    if (!form.national_id) {
-      setError({
-        code: 'MISSING_NATIONAL_ID',
-        message: 'Please enter your National ID number.'
-      });
+    if (!form.identifier) {
+      setError({ code: 'MISSING_NATIONAL_ID', message: 'Please enter your National ID, username, or email.' });
       return;
     }
     if (!form.password) {
-      setError({
-        code: 'MISSING_PASSWORD',
-        message: 'Please enter your password.'
-      });
+      setError({ code: 'MISSING_PASSWORD', message: 'Please enter your password.' });
       return;
     }
 
@@ -105,11 +84,7 @@ const Login = () => {
       const loggedInUser = response.data.user;
       login(loggedInUser, response.data.token);
 
-      const role = String(loggedInUser?.role || '')
-        .trim()
-        .toLowerCase()
-        .replace(/[-\s]+/g, '_');
-
+      const role = String(loggedInUser?.role || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
       const destination = role === 'citizen'
         ? '/dashboard'
         : role === 'home_affairs'
@@ -119,40 +94,29 @@ const Login = () => {
             : '/officer/dashboard';
 
       navigate(destination, { replace: true });
-
     } catch (err) {
-      // ---- Network error (no response at all) ----
       if (!err.response) {
-        setError({
-          code: 'NETWORK_ERROR',
-          message: 'Cannot connect to the server. Please check your internet connection and try again.'
-        });
+        setError({ code: 'NETWORK_ERROR', message: 'Cannot connect to the server. Please check your internet connection and try again.' });
         return;
       }
 
       const { status, data } = err.response;
 
-      // ---- Use backend message if provided ----
       if (data?.message) {
-        setError({
-          code: data.error || 'SERVER_ERROR',
-          message: data.message
-        });
+        setError({ code: data.error || 'SERVER_ERROR', message: data.message });
         return;
       }
 
-      // ---- Fallback by HTTP status ----
       const fallbackByStatus = {
         400: { code: 'MISSING_FIELDS', message: 'Please check your details and try again.' },
-        401: { code: 'INVALID_PASSWORD', message: 'Invalid National ID or password. Please try again.' },
-        403: { code: 'ACCOUNT_PENDING', message: 'You do not have permission to log in. Contact Home Affairs.' },
+        401: { code: 'INVALID_PASSWORD', message: 'Invalid credentials. Please try again.' },
+        403: { code: 'ACCOUNT_SUSPENDED', message: 'This account cannot be used. Please contact Home Affairs.' },
         404: { code: 'USER_NOT_FOUND', message: 'Service not found. Please try again later.' },
         500: { code: 'SERVER_ERROR', message: 'Server error. Please try again in a moment.' },
         503: { code: 'DB_UNAVAILABLE', message: 'Service temporarily unavailable. Please try again shortly.' },
       };
       const fallback = fallbackByStatus[status] || { code: 'SERVER_ERROR', message: 'Login failed. Please try again.' };
       setError(fallback);
-
     } finally {
       setLoading(false);
     }
@@ -183,20 +147,18 @@ const Login = () => {
         <section className="login-card" aria-labelledby="login-title">
           <div className="login-card__avatar"><img src={LESOTHO_LOGO} alt="Lesotho" /></div>
           <h1 id="login-title">Welcome back</h1>
-          <p className="login-card__subtitle">Please sign in to your citizen account</p>
+          <p className="login-card__subtitle">Sign in with your National ID, username, or email</p>
 
           <form onSubmit={handleSubmit} noValidate>
-
-            {/* National ID */}
             <label className="field">
-              <span className="field__label">National ID number</span>
+              <span className="field__label">National ID / Username / Email</span>
               <span className="field__control">
                 <span className="field__icon"><Icon name="user" size={18} /></span>
                 <input
                   type="text"
-                  name="national_id"
-                  placeholder="Enter your national ID"
-                  value={form.national_id}
+                  name="identifier"
+                  placeholder="e.g. 1234567890123 or name_01 or you@mail.com"
+                  value={form.identifier}
                   onChange={handleChange}
                   autoComplete="username"
                   required
@@ -204,7 +166,6 @@ const Login = () => {
               </span>
             </label>
 
-            {/* Password */}
             <label className="field">
               <span className="field__label">Password</span>
               <span className="field__control">
@@ -234,7 +195,6 @@ const Login = () => {
               <button type="button" className="forgot-button">Forgot password?</button>
             </div>
 
-            {/* ---- ERROR DISPLAY ---- */}
             {error.message && (
               <div className={`alert alert--${errorMeta.type}`} role="alert">
                 <span className="alert__icon"><Icon name={errorMeta.icon} size={16} /></span>
@@ -269,12 +229,9 @@ const Login = () => {
   );
 };
 
-/* ============================================================
-   STYLES
-============================================================ */
 const styles = `
   @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap');
-  :root { --ink:#263249; --green:#008f4c; --green-dark:#006b3a; --muted:#7e8799; --lavender:#eef0fb; --soft-shadow:12px 12px 25px rgba(177,184,207,.55),-12px -12px 25px rgba(255,255,255,.95); --inset-shadow:inset 4px 4px 9px rgba(191,197,218,.35),inset -4px -4px 9px rgba(255,255,255,.85); }
+  :root { --ink:#263249; --green:#008f4c; --green-dark:#006b3a; --muted:#7e8799; --lavender:#eef0fb; --inset-shadow:inset 4px 4px 9px rgba(191,197,218,.35),inset -4px -4px 9px rgba(255,255,255,.85); }
   * { box-sizing:border-box; } body { margin:0; font-family:'DM Sans',sans-serif; color:var(--ink); background:var(--lavender); } button,input { font:inherit; } button { cursor:pointer; }
   .login-page { position:relative; min-height:100vh; display:flex; flex-direction:column; overflow:hidden; background-image:linear-gradient(120deg,rgba(0,40,25,.38),rgba(0,70,55,.25),rgba(0,45,80,.28)),var(--page-image); background-size:cover; background-position:center; background-attachment:fixed; background-repeat:no-repeat; }
   .login-header { position:relative; z-index:2; width:min(1060px,calc(100% - 48px)); height:78px; display:flex; align-items:center; margin:0 auto; }.login-header__inner { width:100%; display:flex; align-items:center; justify-content:space-between; }.login-header a { color:inherit; text-decoration:none; }.brand { display:flex; align-items:center; gap:10px; }.brand__mark { width:37px; height:37px; display:grid; place-items:center; overflow:hidden; border:2px solid rgba(255,255,255,.95); border-radius:50%; background:#fff; box-shadow:5px 5px 12px rgba(188,194,215,.45),-4px -4px 10px rgba(255,255,255,.9); }.brand__mark img { width:100%; height:100%; object-fit:cover; }.brand__copy { display:grid; gap:4px; line-height:1; }.brand__copy strong { color:#253048; font:800 16px/1 'Manrope',sans-serif; }.brand__copy small { color:#fff; font-size:9px; letter-spacing:.1em; text-transform:uppercase; }
@@ -285,62 +242,17 @@ const styles = `
   .social-row { display:flex; justify-content:center; gap:14px; }.social-row button { width:42px; height:42px; display:grid; place-items:center; color:#000; border:1px solid rgba(255,255,255,.8); border-radius:50%; background:#eef0fb; box-shadow:5px 5px 10px rgba(188,194,215,.42),-5px -5px 10px rgba(255,255,255,.9); font:700 17px 'Manrope',sans-serif; }.social-row button:hover { transform:translateY(-2px); }
   .register-prompt { margin:18px 0 0; color:#fff; font-size:10px; }.register-prompt a { color:var(--green); font-weight:700; text-decoration:none; }
   .login-footer { position:relative; z-index:1; width:min(1060px,calc(100% - 48px)); display:flex; align-items:center; justify-content:space-between; gap:20px; margin:0 auto; padding:15px 0; color:#fff; border-top:1px solid rgba(205,210,226,.8); font-size:9px; }.login-footer span:last-child { display:flex; align-items:center; gap:5px; }
-
-  /* ============================================================
-     ALERT STYLES — different colors per error type
-  ============================================================ */
-  .alert {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    margin-top: 14px;
-    padding: 11px 13px;
-    border-radius: 10px;
-    font-size: 11px;
-    line-height: 1.5;
-    text-align: left;
-    animation: alertSlide 0.2s ease-out;
-  }
-  @keyframes alertSlide {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-  .alert__icon { flex-shrink: 0; margin-top: 1px; display: grid; place-items: center; }
-  .alert__message { flex: 1; }
-
-  /* Error — red (wrong credentials, server error) */
-  .alert--error {
-    color: #a23c3c;
-    background: #fbeff0;
-    border: 1px solid #f0d8da;
-  }
-  .alert--error .alert__icon { color: #c53030; }
-
-  /* Warning — amber (missing fields, network, DB down) */
-  .alert--warning {
-    color: #8a5a00;
-    background: #fff8e6;
-    border: 1px solid #f5e0a3;
-  }
-  .alert--warning .alert__icon { color: #b7791f; }
-
-  /* Info — blue (pending verification) */
-  .alert--info {
-    color: #1e4a80;
-    background: #eff6ff;
-    border: 1px solid #c7dffc;
-  }
-  .alert--info .alert__icon { color: #2b6cb0; }
-
-  @media (max-width:700px) {
-    .login-header { width:calc(100% - 36px); height:70px; }
-    .login-nav { display:none; }
-    .mobile-menu { display:block; }
-    .login-main { padding-top:15px; }
-    .login-card { padding:27px 21px 23px; }
-    .login-footer { width:calc(100% - 36px); }
-    .login-footer span:last-child { display:none; }
-  }
+  .alert { display:flex; align-items:flex-start; gap:10px; margin-top:14px; padding:11px 13px; border-radius:10px; font-size:11px; line-height:1.5; text-align:left; animation:alertSlide .2s ease-out; }
+  @keyframes alertSlide { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:translateY(0); } }
+  .alert__icon { flex-shrink:0; margin-top:1px; display:grid; place-items:center; }
+  .alert__message { flex:1; }
+  .alert--error { color:#a23c3c; background:#fbeff0; border:1px solid #f0d8da; }
+  .alert--error .alert__icon { color:#c53030; }
+  .alert--warning { color:#8a5a00; background:#fff8e6; border:1px solid #f5e0a3; }
+  .alert--warning .alert__icon { color:#b7791f; }
+  .alert--info { color:#1e4a80; background:#eff6ff; border:1px solid #c7dffc; }
+  .alert--info .alert__icon { color:#2b6cb0; }
+  @media (max-width:700px) { .login-header { width:calc(100% - 36px); height:70px; }.login-nav { display:none; }.mobile-menu { display:block; }.login-main { padding-top:15px; }.login-card { padding:27px 21px 23px; }.login-footer { width:calc(100% - 36px); }.login-footer span:last-child { display:none; } }
 `;
 
 export default Login;
