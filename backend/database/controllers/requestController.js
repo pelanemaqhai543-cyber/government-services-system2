@@ -2,6 +2,9 @@ const db = require('../config/db');
 
 const generateRef = () => 'REF-' + Date.now().toString().slice(-8) + Math.floor(Math.random() * 100);
 
+/* ============================================================
+   Create request — blocked for deceased citizens
+============================================================ */
 exports.createRequest = async (req, res) => {
   const { service_type, department, notes } = req.body;
   const userId = req.user.id;
@@ -12,6 +15,18 @@ exports.createRequest = async (req, res) => {
   }
 
   try {
+    // ---- Block deceased citizens ----
+    const [userRows] = await db.query('SELECT status FROM users WHERE id = ?', [userId]);
+    if (userRows.length === 0) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+    if (userRows[0].status === 'deceased') {
+      return res.status(403).json({
+        error: 'ACCOUNT_DECEASED',
+        message: 'This account is marked as deceased. New requests cannot be submitted.'
+      });
+    }
+
     const [result] = await db.query(
       'INSERT INTO service_requests (reference_number, user_id, service_type, department, notes) VALUES (?, ?, ?, ?, ?)',
       [ref, userId, service_type, department, notes || null]
@@ -33,6 +48,9 @@ exports.createRequest = async (req, res) => {
   }
 };
 
+/* ============================================================
+   Get my requests — cancelled requests included
+============================================================ */
 exports.getMyRequests = async (req, res) => {
   try {
     const [rows] = await db.query(
@@ -58,17 +76,18 @@ exports.getRequestByRef = async (req, res) => {
   }
 };
 
-// Officer queue
+/* ============================================================
+   Officer queue — deceased requests flagged
+============================================================ */
 exports.getQueue = async (req, res) => {
   try {
     let query = `
-      SELECT sr.*, u.full_name, u.national_id 
-      FROM service_requests sr 
+      SELECT sr.*, u.full_name, u.national_id, u.status AS citizen_status
+      FROM service_requests sr
       JOIN users u ON sr.user_id = u.id
     `;
     const params = [];
 
-    // Non-home-affairs roles only see their department's requests
     if (req.user.role !== 'home_affairs') {
       query += ' WHERE sr.department = ?';
       params.push(req.user.role);
@@ -88,7 +107,7 @@ exports.updateRequestStatus = async (req, res) => {
   const { status } = req.body;
   const { id } = req.params;
 
-  const validStatuses = ['ready', 'review', 'submitted', 'rejected', 'completed'];
+  const validStatuses = ['ready', 'review', 'submitted', 'rejected', 'completed', 'cancelled'];
   if (!validStatuses.includes(status)) {
     return res.status(400).json({ message: 'Invalid status' });
   }
@@ -97,9 +116,17 @@ exports.updateRequestStatus = async (req, res) => {
     const [rows] = await db.query('SELECT * FROM service_requests WHERE id = ?', [id]);
     if (rows.length === 0) return res.status(404).json({ message: 'Request not found' });
 
-    // Non-home-affairs can only update their own department's requests
     if (req.user.role !== 'home_affairs' && rows[0].department !== req.user.role) {
       return res.status(403).json({ message: 'Access denied to this department' });
+    }
+
+    // ---- Block status change if citizen is deceased ----
+    const [userRows] = await db.query('SELECT status FROM users WHERE id = ?', [rows[0].user_id]);
+    if (userRows.length > 0 && userRows[0].status === 'deceased' && status !== 'cancelled') {
+      return res.status(403).json({
+        error: 'CITIZEN_DECEASED',
+        message: 'This citizen is marked as deceased. Request cannot be processed further.'
+      });
     }
 
     await db.query('UPDATE service_requests SET status = ? WHERE id = ?', [status, id]);

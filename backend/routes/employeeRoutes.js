@@ -34,13 +34,6 @@ const requireEmployeeRole = (req, res, next) => {
   next();
 };
 
-// TEST ROUTE
-router.get('/test', (req, res) => {
-  res.json({
-    message: 'Employee route is working',
-  });
-});
-
 router.get(
   '/search-citizen',
   verifyToken,
