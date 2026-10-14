@@ -15,8 +15,8 @@ const OfficerSearch = () => {
   const search = async (event) => {
     event.preventDefault();
     const value = nationalId.trim();
-    if (!value) {
-      setError('Enter a National ID to search.');
+    if (!/^\d{13}$/.test(value)) {
+      setError('National ID must contain exactly 13 digits, with no letters or symbols.');
       return;
     }
 
@@ -33,7 +33,7 @@ const OfficerSearch = () => {
       const status = requestError.response?.status;
 
       if (status === 404) {
-        setError('Verified citizen not found, or the employee search route is not available.');
+        setError(requestError.response?.data?.message || 'Verified citizen not found.');
       } else if (status === 403) {
         setError('You are not authorized to search citizens.');
       } else if (status === 401) {
@@ -50,7 +50,7 @@ const OfficerSearch = () => {
     <OfficerLayout title="Citizen Search" subtitle="Search verified citizens by National ID. You only see fields your department is authorized to access.">
       <style>{styles}</style>
       <div className="officer-search-page">
-        <section className="search-panel"><div className="panel-heading"><div><div className="eyebrow"><span /> Secure lookup</div><h2>Find a citizen</h2><p>Use the citizen's National ID to retrieve authorized records.</p></div></div><form onSubmit={search} className="search-form"><label htmlFor="national-id">National ID</label><div className="search-controls"><input id="national-id" inputMode="numeric" placeholder="e.g. 60101234" value={nationalId} onChange={(event) => setNationalId(event.target.value)} /><button type="submit" disabled={loading}>{loading ? 'Searching...' : 'Search citizen'}</button></div></form></section>
+        <section className="search-panel"><div className="panel-heading"><div><div className="eyebrow"><span /> Secure lookup</div><h2>Find a citizen</h2><p>Use the citizen's National ID to retrieve authorized records.</p></div></div><form onSubmit={search} className="search-form"><label htmlFor="national-id">National ID</label><div className="search-controls"><input id="national-id" inputMode="numeric" maxLength={13} pattern="[0-9]{13}" placeholder="Enter 13-digit National ID" value={nationalId} onChange={(event) => setNationalId(event.target.value)} /><button type="submit" disabled={loading}>{loading ? 'Searching...' : 'Search citizen'}</button></div></form></section>
         {error && <div className="search-alert" role="alert">{error}</div>}
         {result && <section className="result-card" aria-live="polite"><div className="result-header"><div className="avatar">{result.full_name?.charAt(0)?.toUpperCase() || 'C'}</div><div><h2>{result.full_name || 'Citizen record'}</h2><p>National ID: {result.national_id || nationalId}</p></div></div><div className="fields">{Object.entries(result).map(([key, value]) => { if (['full_name', 'national_id'].includes(key) || value === null || value === undefined || value === '') return null; return <div className="field" key={key}><span>{key.replace(/_/g, ' ')}</span><strong>{String(value)}</strong></div>; })}</div></section>}
       </div>

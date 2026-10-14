@@ -50,6 +50,10 @@ const Register = () => {
       setError('Please fill in all required fields.');
       return;
     }
+    if (!/^\d{13}$/.test(form.national_id)) {
+      setError('National ID must contain exactly 13 digits, with no letters or symbols.');
+      return;
+    }
     if (form.password.length < 6) {
       setError('Password must be at least 6 characters.');
       return;
@@ -78,12 +82,12 @@ const Register = () => {
     }
   };
 
-  const field = (name, label, icon, type = 'text', required = false) => (
+  const field = (name, label, icon, type = 'text', required = false, inputProps = {}) => (
     <label className="field">
       <span className="field__label">{label}{required && <b> *</b>}</span>
       <span className="field__control">
         <span className="field__icon"><Icon name={icon} size={18} /></span>
-        <input name={name} type={type} value={form[name]} onChange={handleChange} autoComplete={name === 'password' ? 'new-password' : name} required={required} />
+        <input name={name} type={type} value={form[name]} onChange={handleChange} autoComplete={name === 'password' ? 'new-password' : name} required={required} {...inputProps} />
       </span>
     </label>
   );
@@ -123,7 +127,13 @@ const Register = () => {
             <p className="register-card__subtitle">Enter your details below to get started.</p>
             <form onSubmit={handleSubmit} noValidate>
               <div className="form-grid">
-                {field('national_id', 'National ID number', 'id', 'text', true)}
+                {field('national_id', 'National ID number', 'id', 'text', true, {
+                  inputMode: 'numeric',
+                  maxLength: 13,
+                  minLength: 13,
+                  pattern: '[0-9]{13}',
+                  title: 'Enter exactly 13 digits',
+                })}
                 {field('full_name', 'Full name', 'user', 'text', true)}
                 {field('email', 'Email address', 'mail')}
                 {field('phone', 'Phone number', 'phone')}

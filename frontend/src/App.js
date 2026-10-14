@@ -27,6 +27,7 @@ import AdminDashboard from './pages/admin/AdminDashboard';
 import AdminVerify from './pages/admin/AdminVerify';
 import AdminRequests from './pages/admin/AdminRequests';
 import AdminAccess from './pages/admin/AdminAccess';
+import ReportDeath from './pages/ReportDeath';
 
 // =====================================================
 // OFFICER PAGES
@@ -87,7 +88,6 @@ function App() {
             }
           />
 
-
           {/* =================================================
               SERVICE RENEWAL
           ================================================== */}
@@ -138,12 +138,9 @@ function App() {
 
           {/* =================================================
               ADMIN DASHBOARD
-              
-              Role:
-              admin
+              Role: admin
           ================================================== */}
 
-          {/* Admin Main Dashboard */}
           <Route
             path="/admin"
             element={
@@ -153,17 +150,15 @@ function App() {
             }
           />
 
-          {/* Admin - Verify Citizens */}
           <Route
             path="/admin/verify"
             element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={['admin', 'home_affairs']}>
                 <AdminVerify />
               </ProtectedRoute>
             }
           />
 
-          {/* Admin - Manage Requests */}
           <Route
             path="/admin/requests"
             element={
@@ -173,7 +168,6 @@ function App() {
             }
           />
 
-          {/* Admin - Manage Access */}
           <Route
             path="/admin/access"
             element={
@@ -185,14 +179,9 @@ function App() {
 
           {/* =================================================
               HOME AFFAIRS ADMIN / OFFICER
-              
-              Role:
-              home_affairs
-              
-              Home Affairs gets its own admin-style interface.
+              Role: home_affairs
           ================================================== */}
 
-          {/* Home Affairs Dashboard */}
           <Route
             path="/home-affairs"
             element={
@@ -202,7 +191,6 @@ function App() {
             }
           />
 
-          {/* Home Affairs - Verify */}
           <Route
             path="/home-affairs/verify"
             element={
@@ -212,7 +200,6 @@ function App() {
             }
           />
 
-          {/* Home Affairs - Requests */}
           <Route
             path="/home-affairs/requests"
             element={
@@ -222,7 +209,6 @@ function App() {
             }
           />
 
-          {/* Home Affairs - Access */}
           <Route
             path="/home-affairs/access"
             element={
@@ -232,18 +218,21 @@ function App() {
             }
           />
 
+          {/* Home Affairs - Report Citizen Death (NEW) */}
+          <Route
+            path="/home-affairs/report-death"
+            element={
+              <ProtectedRoute allowedRoles={['home_affairs']}>
+                <ReportDeath />
+              </ProtectedRoute>
+            }
+          />
+
           {/* =================================================
               DEPARTMENT OFFICERS
-              
-              Roles:
-              traffic
-              finance
-              pension
-              police
-              passport
+              Roles: traffic, finance, pension, police, passport
           ================================================== */}
 
-          {/* Officer Dashboard */}
           <Route
             path="/officer/dashboard"
             element={
@@ -261,7 +250,6 @@ function App() {
             }
           />
 
-          {/* Officer Requests */}
           <Route
             path="/officer/requests"
             element={
@@ -279,7 +267,6 @@ function App() {
             }
           />
 
-          {/* Officer Search */}
           <Route
             path="/officer/search"
             element={
@@ -297,7 +284,6 @@ function App() {
             }
           />
 
-          {/* Officer History */}
           <Route
             path="/officer/history"
             element={
@@ -317,7 +303,6 @@ function App() {
 
           {/* =================================================
               UNKNOWN URL
-              
               Send unknown pages back to Home.
           ================================================== */}
           <Route
