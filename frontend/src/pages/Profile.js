@@ -70,6 +70,34 @@ const styles = `
 
   .profile-main { min-width:0; width:calc(100% - 240px); min-height:100vh; margin-left:240px; padding:32px 40px; }
   @media (max-width:700px) { .profile-main { width:100%; margin-left:0; padding:22px 16px 32px; } .profile-page .field-grid { grid-template-columns:1fr; } .profile-page .field.full { grid-column:auto; } }
+
+.profile-page{padding-bottom:35px}
+.profile-page .hero{position:relative;overflow:hidden;padding:30px 32px;margin-bottom:24px;border:1px solid #00166f;border-radius:22px;background:linear-gradient(118deg,#00145f 0%,#00209f 58%,#003dbb 100%);box-shadow:0 18px 40px rgba(0,32,159,.18)}
+.profile-page .hero:after{position:absolute;right:-88px;bottom:-132px;width:320px;height:320px;content:'';border:45px solid rgba(0,149,67,.34);border-radius:50%}
+.profile-page .hero>*{position:relative;z-index:1}
+.profile-page .hero .eyebrow{color:#baf2cf}
+.profile-page .hero .eyebrow span{background:#20c778;box-shadow:0 0 0 5px rgba(32,199,120,.2)}
+.profile-page .hero h1{color:#fff;font-size:clamp(28px,3.2vw,42px);letter-spacing:-.055em}
+.profile-page .hero p{color:rgba(255,255,255,.78);max-width:650px}
+.profile-page .card{position:relative;overflow:hidden;box-shadow:0 11px 28px rgba(20,35,60,.07)}
+.profile-page .card:before{position:absolute;top:0;left:0;right:0;height:4px;content:'';background:#00209f}
+.profile-page .card:nth-of-type(3):before{background:#009543}
+.profile-page .card-title{font-size:17px;letter-spacing:-.025em}
+.profile-page .picture-row{padding:4px 0 8px}
+.profile-page .avatar{width:118px;height:118px;border:5px solid #fff;box-shadow:0 0 0 4px #dce6ff,0 10px 22px rgba(0,32,159,.15);background:#00209f}
+.profile-page .lock-badge{background:#000;box-shadow:0 3px 7px rgba(0,0,0,.2)}
+.profile-page .picture-info h3{font-size:18px;color:#000}
+.profile-page .picture-info p{max-width:520px}
+.profile-page .btn{box-shadow:0 5px 12px rgba(20,35,60,.06)}
+.profile-page .btn-primary{background:#00209f;box-shadow:0 7px 15px rgba(0,32,159,.16)}
+.profile-page .btn-primary:hover{background:#009543;border-color:#009543}
+.profile-page .upload-box{border-color:#aebfdf;background:linear-gradient(135deg,#fbfcff,#f1f5ff)}
+.profile-page .upload-box:hover{border-color:#009543;background:#effaf4}
+.profile-page .locked-note{border-left-color:#009543;background:linear-gradient(100deg,#edf8f1,#fff8e6);box-shadow:0 8px 20px rgba(20,35,60,.05)}
+.profile-page .locked-note svg{color:#009543}
+.profile-page .picture-restriction{border-left-color:#00209f;background:linear-gradient(100deg,#edf2ff,#f4f7ff);color:#1e3a8a}
+.profile-page .field input{border-color:#dbe2ee;background:#f8faff}
+@media(max-width:600px){.profile-page .hero{padding:24px 20px}.profile-page .card{padding:21px 18px}}
 `;
 
 const Profile = () => {

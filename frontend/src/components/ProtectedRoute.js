@@ -2,7 +2,16 @@ import React from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const normalizeRole = (role) => String(role || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+const normalizeRole = (role) =>
+  String(role || '').trim().toLowerCase().replace(/[-\s]+/g, '_');
+
+const homeFor = (role) => {
+  const r = normalizeRole(role);
+  if (r === 'citizen') return '/dashboard';
+  if (r === 'home_affairs') return '/home-affairs';
+  if (r === 'admin') return '/admin';
+  return '/officer/dashboard';
+};
 
 const ProtectedRoute = ({ children, allowedRoles = [] }) => {
   const auth = useAuth();
@@ -10,7 +19,6 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
   const user = auth?.user;
   const authLoading = auth?.loading ?? auth?.isLoading ?? false;
 
-  // Do not redirect while AuthContext is restoring the saved session.
   if (authLoading) {
     return (
       <div style={styles.loading} role="status" aria-live="polite">
@@ -19,7 +27,6 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
     );
   }
 
-  // Only unauthenticated users should be sent to the login page.
   if (!user) {
     return (
       <Navigate
@@ -31,18 +38,21 @@ const ProtectedRoute = ({ children, allowedRoles = [] }) => {
   }
 
   const userRole = normalizeRole(user.role);
-  const permittedRoles = allowedRoles.map(normalizeRole);
-  const hasRoleRestriction = permittedRoles.length > 0;
-  const roleAllowed = !hasRoleRestriction || permittedRoles.includes(userRole);
+  const permitted = allowedRoles.map(normalizeRole);
+  const roleAllowed = permitted.length === 0 || permitted.includes(userRole);
 
-  // An authenticated user with the wrong role is not a login failure.
-  // Send them to a safe page instead of creating a sign-in redirect loop.
   if (!roleAllowed) {
-    const fallbackPath = userRole === 'home_affairs' || userRole === 'admin'
-      ? '/home-affairs'
-      : '/officer/dashboard';
+    const target = homeFor(userRole);
 
-    return <Navigate to={fallbackPath} replace state={{ unauthorized: true }} />;
+    // Already on their own home page but still not allowed: stop, don't loop.
+    if (location.pathname === target) {
+      return (
+        <div style={styles.loading} role="alert">
+          Your account does not have access to this page. Please contact an administrator.
+        </div>
+      );
+    }
+    return <Navigate to={target} replace state={{ unauthorized: true }} />;
   }
 
   return children;
@@ -53,6 +63,8 @@ const styles = {
     minHeight: '40vh',
     display: 'grid',
     placeItems: 'center',
+    textAlign: 'center',
+    padding: 24,
     color: '#00209F',
     fontFamily: 'system-ui, sans-serif',
     fontSize: 14,

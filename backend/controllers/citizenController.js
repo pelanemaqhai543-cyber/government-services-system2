@@ -95,13 +95,14 @@ exports.verifyCitizen = async (req, res) => {
 
 /* ============================================================
    List all citizens — Home Affairs view-only
+   Includes picture_data so directory can show real avatars
 ============================================================ */
 exports.getAllCitizens = async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT u.id, u.national_id, u.username, u.account_type,
               u.full_name, u.email, u.phone,
-              u.status, u.created_at,
+              u.status, u.created_at, u.picture_data,
               u.date_of_birth, u.gender,
               cp.verification_status
        FROM users u
@@ -152,7 +153,6 @@ exports.reportDeath = async (req, res) => {
       });
     }
 
-    // 1. Mark as deceased
     await db.query(
       `UPDATE users
        SET status = 'deceased',
@@ -163,7 +163,6 @@ exports.reportDeath = async (req, res) => {
       [reason || null, req.user.id, citizen.id]
     );
 
-    // 2. Cancel active requests
     const [cancelResult] = await db.query(
       `UPDATE service_requests
        SET status = 'cancelled',
@@ -172,13 +171,11 @@ exports.reportDeath = async (req, res) => {
       [citizen.id]
     );
 
-    // 3. Notify the citizen account (audit trail)
     await db.query(
       'INSERT INTO notifications (user_id, message) VALUES (?, ?)',
       [citizen.id, `Account marked as deceased on ${new Date().toLocaleDateString()}. All active requests cancelled.`]
     );
 
-    // 4. Broadcast to all departments
     const affected = ['home_affairs', 'traffic', 'finance', 'pension', 'police', 'passport'];
     await db.query(
       `INSERT INTO notification_events
@@ -197,7 +194,6 @@ exports.reportDeath = async (req, res) => {
       ]
     );
 
-    // 5. Log the change
     await db.query(
       `INSERT INTO change_log (user_id, field_changed, old_value, new_value, changed_by, reason)
        VALUES (?, 'status', 'active', 'deceased', ?, ?)`,
@@ -218,7 +214,6 @@ exports.reportDeath = async (req, res) => {
 
 /* ============================================================
    Set profile picture — ONE TIME ONLY
-   Once set, it can never be changed from the portal.
 ============================================================ */
 exports.updateProfilePicture = async (req, res) => {
   const { picture_url } = req.body;
@@ -230,7 +225,6 @@ exports.updateProfilePicture = async (req, res) => {
     });
   }
 
-  // Keep large base64 payloads from filling the database unexpectedly.
   if (picture_url.length > 8 * 1024 * 1024) {
     return res.status(413).json({
       error: 'PICTURE_TOO_LARGE',
@@ -239,9 +233,6 @@ exports.updateProfilePicture = async (req, res) => {
   }
 
   try {
-    // The condition in this UPDATE is the security rule. It makes the
-    // first upload atomic and prevents two simultaneous requests from
-    // replacing or overwriting the saved picture.
     const [result] = await db.query(
       `UPDATE users
        SET picture_data = ?

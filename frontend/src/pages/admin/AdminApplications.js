@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import OfficerLayout from '../../components/OfficerLayout';
 import API from '../../utils/api';
+import AISummaryPanel from '../../components/AISummaryPanel';
 
 const STATUS_COLORS = {
   submitted: { bg: '#ede9fe', color: '#6d28d9' },
@@ -50,10 +51,13 @@ const styles = `
   .admin-apps .dept-chip { padding:7px 12px; border:1px solid var(--border); background:#fff; border-radius:99px; font-size:11px; font-weight:800; color:var(--muted); text-transform:capitalize; }
   .admin-apps .dept-chip.active { background:var(--blue); color:#fff; border-color:var(--blue); }
   .admin-apps .table-wrap { background:#fff; border:1px solid var(--border); border-radius:14px; overflow:hidden; }
-  .admin-apps .table-head { display:grid; grid-template-columns:1.3fr 1fr 1.2fr 1fr 1fr 0.9fr; gap:12px; padding:14px 20px; background:#f7f9fc; border-bottom:1px solid var(--border); font-size:11px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
-  .admin-apps .row { display:grid; grid-template-columns:1.3fr 1fr 1.2fr 1fr 1fr 0.9fr; gap:12px; padding:16px 20px; border-bottom:1px solid #f0f2f5; align-items:center; font-size:13px; }
+  .admin-apps .table-head { display:grid; grid-template-columns:1.3fr 1.6fr 1.2fr 1fr 1fr 0.9fr; gap:12px; padding:14px 20px; background:#f7f9fc; border-bottom:1px solid var(--border); font-size:11px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .admin-apps .row { display:grid; grid-template-columns:1.3fr 1.6fr 1.2fr 1fr 1fr 0.9fr; gap:12px; padding:16px 20px; border-bottom:1px solid #f0f2f5; align-items:center; font-size:13px; }
   .admin-apps .row:hover { background:#fafbfe; }
   .admin-apps .ref { font-weight:800; color:var(--blue); }
+  .admin-apps .citizen-cell { display:flex; align-items:center; gap:10px; min-width:0; }
+  .admin-apps .mini-avatar { width:32px; height:32px; border-radius:50%; background:var(--blue); color:#fff; display:grid; place-items:center; font-size:12px; font-weight:800; overflow:hidden; flex-shrink:0; }
+  .admin-apps .mini-avatar img { width:100%; height:100%; object-fit:cover; }
   .admin-apps .dept-tag { display:inline-block; padding:3px 9px; border-radius:99px; font-size:10.5px; font-weight:800; color:#fff; text-transform:capitalize; }
   .admin-apps .badge { display:inline-block; padding:4px 10px; border-radius:99px; font-size:11px; font-weight:800; text-transform:capitalize; }
   .admin-apps .view-btn { padding:7px 12px; background:var(--blue); color:#fff; border:none; border-radius:8px; font-size:11.5px; font-weight:800; }
@@ -65,6 +69,11 @@ const styles = `
   .admin-apps .modal-head p { margin-top:6px; color:var(--muted); font-size:12.5px; }
   .admin-apps .close { background:transparent; border:none; color:var(--muted); padding:6px; }
   .admin-apps .modal-body { padding:22px 26px; }
+  .admin-apps .applicant-card { display:flex; align-items:center; gap:14px; padding:14px; background:#f7f9fc; border:1px solid var(--border); border-radius:12px; margin-bottom:20px; }
+  .admin-apps .applicant-avatar { width:52px; height:52px; border-radius:50%; background:var(--blue); color:#fff; display:grid; place-items:center; font-size:20px; font-weight:800; overflow:hidden; flex-shrink:0; }
+  .admin-apps .applicant-avatar img { width:100%; height:100%; object-fit:cover; }
+  .admin-apps .applicant-name { font-size:15px; font-weight:800; color:var(--ink); }
+  .admin-apps .applicant-meta { font-size:12px; color:var(--muted); margin-top:3px; }
   .admin-apps .detail-section { margin-bottom:20px; }
   .admin-apps .detail-section h3 { font-size:12px; font-weight:800; color:var(--blue); text-transform:uppercase; letter-spacing:.1em; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border); }
   .admin-apps .field-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
@@ -95,7 +104,7 @@ const AdminApplications = () => {
     try {
       setLoading(true);
       setError('');
-      const res = await API.get('/applications/officer/queue');
+      const res = await API.get('/requests/queue');
       setApps(res.data || []);
     } catch (err) {
       setError(err.response?.data?.message || 'Unable to load applications.');
@@ -106,12 +115,12 @@ const AdminApplications = () => {
 
   useEffect(() => { loadQueue(); }, []);
 
-  const openApp = async (id) => {
-    try {
-      const res = await API.get(`/applications/officer/${id}`);
-      setSelected(res.data);
-    } catch (err) {
-      alert('Unable to load application.');
+  const openApp = (id) => {
+    const app = apps.find((a) => a.id === id);
+    if (app) {
+      setSelected(app);
+    } else {
+      alert('Application not found.');
     }
   };
 
@@ -121,8 +130,8 @@ const AdminApplications = () => {
       const q = search.toLowerCase();
       const match =
         String(a.reference_number || '').toLowerCase().includes(q) ||
-        String(a.citizen_name || '').toLowerCase().includes(q) ||
-        String(a.citizen_id || '').toLowerCase().includes(q) ||
+        String(a.full_name || '').toLowerCase().includes(q) ||
+        String(a.national_id || '').toLowerCase().includes(q) ||
         String(a.service_type || '').toLowerCase().includes(q);
       if (!match) return false;
     }
@@ -199,7 +208,16 @@ const AdminApplications = () => {
             filtered.map((a) => (
               <div className="row" key={a.id}>
                 <span className="ref">{a.reference_number}</span>
-                <span>{a.citizen_name || a.citizen_id || a.citizen_username || '—'}</span>
+                <span className="citizen-cell">
+                  <span className="mini-avatar">
+                    {a.picture_data
+                      ? <img src={a.picture_data} alt="" />
+                      : (a.full_name || '?').charAt(0).toUpperCase()}
+                  </span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {a.full_name || a.national_id || '—'}
+                  </span>
+                </span>
                 <span>{a.service_type}</span>
                 <span>
                   <span className="dept-tag" style={{ background: DEPT_COLORS[a.department] || '#718096' }}>
@@ -226,15 +244,19 @@ const AdminApplications = () => {
                 <button className="close" onClick={() => setSelected(null)}><Icon name="close" size={20} /></button>
               </div>
               <div className="modal-body">
-                <div className="detail-section">
-                  <h3>Applicant</h3>
-                  <div className="field-grid">
-                    <div className="field"><label>Name</label><div>{selected.citizen_name || '—'}</div></div>
-                    <div className="field"><label>National ID</label><div>{selected.citizen_id || '—'}</div></div>
-                    <div className="field"><label>Username</label><div>{selected.citizen_username || '—'}</div></div>
-                    <div className="field"><label>Email</label><div>{selected.citizen_email || '—'}</div></div>
-                    <div className="field"><label>Status</label><div>{selected.status}</div></div>
-                    <div className="field"><label>Submitted</label><div>{new Date(selected.created_at).toLocaleString()}</div></div>
+                <AISummaryPanel applicationId={selected.id} />
+                
+                <div className="applicant-card">
+                  <div className="applicant-avatar">
+                    {selected.picture_data
+                      ? <img src={selected.picture_data} alt="" />
+                      : (selected.full_name || '?').charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="applicant-name">{selected.full_name || '—'}</div>
+                    <div className="applicant-meta">
+                      {selected.national_id ? `ID: ${selected.national_id}` : ''}
+                    </div>
                   </div>
                 </div>
 
@@ -252,9 +274,9 @@ const AdminApplications = () => {
                   </div>
                 )}
 
-                {selected.documents && selected.documents.length > 0 && (
+                {selected.documents && selected.documents.length > 0 ? (
                   <div className="detail-section">
-                    <h3>Documents ({selected.documents.length})</h3>
+                    <h3>Supporting documents ({selected.documents.length})</h3>
                     <div className="doc-list">
                       {selected.documents.map((d) => (
                         <div className="doc" key={d.id}>
@@ -262,6 +284,13 @@ const AdminApplications = () => {
                           <a href={d.file_data} download={d.file_name}>Download ↓</a>
                         </div>
                       ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="detail-section">
+                    <h3>Supporting documents</h3>
+                    <div style={{ padding: '14px', background: '#f7f9fc', border: '1px dashed #cbd5e1', borderRadius: '10px', color: '#718096', fontSize: '13px', textAlign: 'center' }}>
+                      No supporting documents uploaded with this application.
                     </div>
                   </div>
                 )}

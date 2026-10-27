@@ -199,6 +199,37 @@ const styles = `
   .apply-main { min-width:0; width:calc(100% - 240px); min-height:100vh; margin-left:240px; padding:32px 40px; }
   @media (max-width:900px) { .apply-page .form-grid { grid-template-columns:1fr; }.apply-main { width:100%; } }
   @media (max-width:600px) { .apply-main { width:100%; margin-left:0; padding:22px 16px 32px; }.apply-page .form-card { padding:22px 18px; }.apply-page .actions { flex-direction:column-reverse; }.apply-page .btn { width:100%; } }
+
+.apply-page{padding-bottom:35px}
+.apply-page .hero{position:relative;overflow:hidden;padding:30px 32px;margin-bottom:26px;border:1px solid #00166f;border-radius:22px;background:linear-gradient(118deg,#00145f 0%,#00209f 58%,#003dbb 100%);box-shadow:0 18px 40px rgba(0,32,159,.18)}
+.apply-page .hero:after{position:absolute;right:-88px;bottom:-132px;width:320px;height:320px;content:'';border:45px solid rgba(0,149,67,.34);border-radius:50%}
+.apply-page .hero>*{position:relative;z-index:1}
+.apply-page .hero .eyebrow{color:#baf2cf}
+.apply-page .hero .eyebrow span{background:#20c778;box-shadow:0 0 0 5px rgba(32,199,120,.2)}
+.apply-page .hero h1{color:#fff;font-size:clamp(28px,3.2vw,42px);letter-spacing:-.055em}
+.apply-page .hero p{color:rgba(255,255,255,.78);max-width:720px}
+.apply-page .service-card{position:relative;overflow:hidden;min-height:178px;border-radius:16px;box-shadow:0 8px 20px rgba(20,35,60,.05);transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease}
+.apply-page .service-card:before{position:absolute;top:0;left:0;right:0;height:4px;content:'';background:#00209f}
+.apply-page .service-card:nth-child(3n+2):before{background:#009543}
+.apply-page .service-card:nth-child(3n):before{background:#000}
+.apply-page .service-card:hover{transform:translateY(-5px);border-color:#9bb3ee;box-shadow:0 16px 30px rgba(0,32,159,.11)}
+.apply-page .service-icon{box-shadow:inset 0 0 0 1px #dbe5ff}
+.apply-page .service-card:nth-child(3n+2) .service-icon{color:#007936;background:#eaf8f0}
+.apply-page .service-card:nth-child(3n) .service-icon{color:#000;background:#f2f2f2}
+.apply-page .service-dept{letter-spacing:.06em}
+.apply-page .form-wrap{padding-top:10px}
+.apply-page .form-header{padding:24px 28px;margin-bottom:22px;border-radius:20px;background:linear-gradient(135deg,#f1f5ff,#effaf4);border:1px solid #dce5f4}
+.apply-page .selected-service-icon{background:#00209f;color:#fff;border:0;box-shadow:0 8px 18px rgba(0,32,159,.18)}
+.apply-page .form-header h2{color:#000;letter-spacing:-.04em}
+.apply-page .form-card{box-shadow:0 12px 30px rgba(20,35,60,.08)}
+.apply-page .form-section-title{color:#00209f}
+.apply-page .form-field input:focus,.apply-page .form-field select:focus,.apply-page .form-field textarea:focus{border-color:#009543;box-shadow:0 0 0 3px rgba(0,149,67,.1)}
+.apply-page .upload-box{border-color:#aebfdf;background:linear-gradient(135deg,#fbfcff,#f2f6ff)}
+.apply-page .upload-box:hover{border-color:#009543;background:#effaf4}
+.apply-page .btn-primary{background:#00209f;box-shadow:0 7px 15px rgba(0,32,159,.16)}
+.apply-page .btn-primary:hover{background:#009543;border-color:#009543}
+.apply-page .alert-success{border-left:4px solid #009543}
+@media(max-width:600px){.apply-page .hero{padding:24px 20px}.apply-page .form-header{padding:20px 15px}}
 `;
 
 const Apply = () => {
@@ -267,8 +298,10 @@ const Apply = () => {
 
     setLoading(true);
     try {
-      const response = await API.post('/applications', {
+      const department = serviceDef.department.toLowerCase().replace(/\s+/g, '_');
+      const response = await API.post('/requests', {
         service_type: selectedService,
+        department,
         form_data: formData,
         notes,
         documents,

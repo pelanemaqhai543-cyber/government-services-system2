@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-
 import OfficerLayout from '../../components/OfficerLayout';
-import RequestTable from '../../components/RequestTable';
 import API from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 
@@ -36,6 +34,29 @@ const styles = `
   .officer-page .section-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:15px; margin:25px 0 13px; }.officer-page .section-heading h2 { color:var(--black); font-size:18px; letter-spacing:-.03em; }.officer-page .section-heading p { margin-top:5px; color:var(--muted); font-size:12px; }.officer-page .action-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }.officer-page .action-card { display:flex; align-items:flex-start; gap:13px; min-height:112px; padding:17px; color:inherit; text-align:left; border:1px solid var(--border); border-radius:14px; background:var(--white); box-shadow:0 7px 20px rgba(20,35,60,.04); transition:.2s ease; }.officer-page .action-card:hover { transform:translateY(-2px); border-color:#c5d2ed; }.officer-page .action-icon { display:grid; flex:0 0 auto; place-items:center; width:40px; height:40px; color:var(--blue); border-radius:11px; background:var(--blue-soft); }.officer-page .action-card:nth-child(2) .action-icon { color:var(--black); background:#f2f2f2; }.officer-page .action-card:nth-child(3) .action-icon { color:var(--green); background:var(--green-soft); }.officer-page .action-card h3 { font-size:14px; }.officer-page .action-card p { margin-top:6px; color:var(--muted); font-size:11px; line-height:1.45; }.officer-page .queue-panel { overflow:auto; padding:4px; }.officer-page .queue-panel > * { min-width:650px; }.officer-page .empty-state { padding:42px 20px; color:var(--muted); text-align:center; font-size:13px; }
   @media (max-width:980px) { .officer-page .stats-grid { grid-template-columns:repeat(2,1fr); }.officer-page .overview-grid { grid-template-columns:1fr; }.officer-page .action-grid { grid-template-columns:1fr; } }
   @media (max-width:620px) { .officer-page { padding:0; }.officer-page .hero { align-items:stretch; flex-direction:column; }.officer-page .primary-button { width:100%; }.officer-page .department-heading { align-items:flex-start; }.officer-page .department-badge { width:48px; height:48px; }.officer-page .stats-grid { gap:9px; }.officer-page .stat-card { min-height:116px; padding:14px; }.officer-page .stat-value { font-size:24px; }.officer-page .panel-header,.officer-page .chart-area { padding-left:16px; padding-right:16px; }.officer-page .bar-chart { gap:8px; }.officer-page .bar { width:16px; }.officer-page .summary-body { flex-direction:column; }.officer-page .summary-note { max-width:220px; text-align:center; }.officer-page .section-heading { align-items:flex-start; flex-direction:column; } }
+
+.officer-page{padding-bottom:32px}
+.officer-page .hero{position:relative;overflow:hidden;align-items:center;min-height:188px;padding:30px 32px;margin-bottom:24px;border:1px solid #00166f;border-radius:22px;background:linear-gradient(118deg,#00145f 0%,#00209f 58%,#003dbb 100%);box-shadow:0 18px 40px rgba(0,32,159,.18)}
+.officer-page .hero:after{position:absolute;right:-88px;bottom:-132px;width:320px;height:320px;content:'';border:45px solid rgba(0,149,67,.34);border-radius:50%}
+.officer-page .department-heading{position:relative;z-index:1}
+.officer-page .department-badge{color:#00209f;background:#baf4d2;box-shadow:0 8px 18px rgba(0,0,0,.16)}
+.officer-page .hero .eyebrow{color:#baf2cf}
+.officer-page .hero .eyebrow span{background:#20c778;box-shadow:0 0 0 5px rgba(32,199,120,.2)}
+.officer-page .hero h1{color:#fff;font-size:clamp(28px,3.2vw,42px);letter-spacing:-.055em}
+.officer-page .hero p{color:rgba(255,255,255,.78)}
+.officer-page .hero .primary-button{position:relative;z-index:1;color:#063d22;border-color:#7ce4ad;background:#baf4d2;box-shadow:0 8px 18px rgba(0,0,0,.16)}
+.officer-page .hero .primary-button:hover{color:#fff;border-color:#009543;background:#009543}
+.officer-page .stat-card{transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease}
+.officer-page .stat-card:before{position:absolute;top:0;left:0;right:0;height:4px;content:'';background:#00209f}
+.officer-page .stat-card:nth-child(2):before{background:#000}
+.officer-page .stat-card:nth-child(3):before,.officer-page .stat-card:nth-child(4):before{background:#009543}
+.officer-page .stat-card:hover{transform:translateY(-4px);border-color:#c6d3f4;box-shadow:0 15px 28px rgba(20,35,60,.11)}
+.officer-page .panel,.officer-page .action-card{box-shadow:0 10px 26px rgba(20,35,60,.06)}
+.officer-page .panel-header h2,.officer-page .section-heading h2{letter-spacing:-.035em}
+.officer-page .action-card{position:relative;transition:transform .2s ease,box-shadow .2s ease,border-color .2s ease}
+.officer-page .action-card:after{position:absolute;right:17px;bottom:15px;width:32px;height:3px;content:'';border-radius:99px;background:#009543}
+.officer-page .action-card:hover{transform:translateY(-4px);border-color:#9bb3ee;box-shadow:0 14px 26px rgba(0,32,159,.1)}
+.officer-page .queue-panel{box-shadow:0 10px 26px rgba(20,35,60,.06)}
 `;
 
 const OfficerDashboard = () => {
@@ -47,9 +68,18 @@ const OfficerDashboard = () => {
   const departmentInfo = SERVICE_INFO[department] || { name: 'Department', description: 'Government department services.', code: 'DP' };
 
   const loadRequests = async () => {
-    try { setLoading(true); const response = await API.get('/requests/queue'); setRequests(response.data || []); }
-    catch (error) { console.error('Failed to load department requests:', error); }
-    finally { setLoading(false); }
+    try { 
+      setLoading(true); 
+      // Use the AI Master Queue so the dashboard shows AI processed data
+      const response = await API.get('/ai/master-queue'); 
+      setRequests(response.data.applications || []); 
+    }
+    catch (error) { 
+      console.error('Failed to load department requests:', error); 
+    }
+    finally { 
+      setLoading(false); 
+    }
   };
 
   useEffect(() => { loadRequests(); }, [department]);
@@ -58,8 +88,9 @@ const OfficerDashboard = () => {
     submitted: requests.filter((item) => ['submitted', 'pending'].includes(item.status)).length,
     review: requests.filter((item) => ['review', 'in_review'].includes(item.status)).length,
     ready: requests.filter((item) => item.status === 'ready').length,
-    completed: requests.filter((item) => item.status === 'completed').length,
+    completed: requests.filter((item) => ['completed', 'approved'].includes(item.status)).length,
   }), [requests]);
+  
   const chartMax = Math.max(metrics.submitted, metrics.review, metrics.ready, metrics.completed, 1);
   const barHeight = (value) => `${Math.max(10, Math.round((value / chartMax) * 135))}px`;
   const completionPercent = requests.length ? Math.round((metrics.completed / requests.length) * 100) : 0;
@@ -88,7 +119,32 @@ const OfficerDashboard = () => {
 
         <div className="section-heading"><div><h2>Department services</h2><p>Access services available to the {departmentInfo.name} department.</p></div></div><section className="action-grid"><button className="action-card" type="button" onClick={() => navigate('/officer/requests')}><span className="action-icon"><Icon name="document" /></span><span><h3>Process applications</h3><p>Review and process department applications.</p></span></button><button className="action-card" type="button" onClick={() => navigate('/officer/search')}><span className="action-icon"><Icon name="search" /></span><span><h3>Search citizens</h3><p>Find authorized citizen information.</p></span></button><button className="action-card" type="button" onClick={() => navigate('/officer/history')}><span className="action-icon"><Icon name="history" /></span><span><h3>Application history</h3><p>View previously processed applications.</p></span></button></section>
 
-        <div className="section-heading"><div><h2>Application queue</h2><p>Applications available to your department.</p></div><button className="secondary-button" type="button" onClick={() => navigate('/officer/requests')}>View all <Icon name="arrow" size={14} /></button></div><section className="panel queue-panel">{loading ? <div className="empty-state">Loading applications...</div> : requests.length === 0 ? <div className="empty-state">No applications are currently available.</div> : <RequestTable requests={requests.slice(0,6)} showDepartment={false} onStatusChange={handleStatusChange} />}</section>
+        <div className="section-heading"><div><h2>Application queue</h2><p>Applications available to your department.</p></div><button className="secondary-button" type="button" onClick={() => navigate('/officer/requests')}>View all <Icon name="arrow" size={14} /></button></div><section className="panel queue-panel">{loading ? <div className="empty-state">Loading applications...</div> : requests.length === 0 ? <div className="empty-state">No applications are currently available.</div> : (
+          // Using a simple inline table here to show AI info on dashboard directly
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+            <thead style={{ background: '#f7f9fc', borderBottom: '1px solid #e5e9f0' }}>
+              <tr>
+                <th style={{ padding: '12px', fontSize: '11px', color: '#718096', textTransform: 'uppercase' }}>Reference</th>
+                <th style={{ padding: '12px', fontSize: '11px', color: '#718096', textTransform: 'uppercase' }}>Citizen</th>
+                <th style={{ padding: '12px', fontSize: '11px', color: '#718096', textTransform: 'uppercase' }}>AI Instructions</th>
+                <th style={{ padding: '12px', fontSize: '11px', color: '#718096', textTransform: 'uppercase' }}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {requests.slice(0, 6).map((req) => (
+                <tr key={req.id} style={{ borderBottom: '1px solid #f0f2f5' }}>
+                  <td style={{ padding: '12px', fontWeight: 'bold', color: '#00209F' }}>{req.reference_number}</td>
+                  <td style={{ padding: '12px' }}>{req.full_name}</td>
+                  <td style={{ padding: '12px', fontSize: '12px' }}>
+                    <div style={{ fontWeight: 'bold' }}>{req.ai_summary}</div>
+                    <div style={{ color: '#b45309' }}>{req.ai_instructions}</div>
+                  </td>
+                  <td style={{ padding: '12px' }}><span style={{ padding: '4px 8px', borderRadius: '99px', background: '#e0f2fe', color: '#0369a1', fontSize: '11px', textTransform: 'capitalize' }}>{req.status}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}</section>
       </div>
     </OfficerLayout>
   );

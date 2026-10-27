@@ -53,6 +53,29 @@ const styles = `
     .death-page .actions { flex-direction:column-reverse; }
     .death-page .btn { width:100%; }
   }
+
+.death-page{padding-bottom:35px}
+.death-page .hero{position:relative;overflow:hidden;padding:30px 32px;margin-bottom:24px;border:1px solid #00166f;border-radius:22px;background:linear-gradient(118deg,#00145f 0%,#00209f 58%,#003dbb 100%);box-shadow:0 18px 40px rgba(0,32,159,.18)}
+.death-page .hero:after{position:absolute;right:-88px;bottom:-132px;width:320px;height:320px;content:'';border:45px solid rgba(189,69,69,.34);border-radius:50%}
+.death-page .hero>*{position:relative;z-index:1}
+.death-page .hero .eyebrow{color:#ffd0d0}
+.death-page .hero .eyebrow span{background:#ff8b8b;box-shadow:0 0 0 5px rgba(255,139,139,.2)}
+.death-page .hero h1{color:#fff;font-size:clamp(28px,3.2vw,42px);letter-spacing:-.055em}
+.death-page .hero p{color:rgba(255,255,255,.8);max-width:750px}
+.death-page .warning{box-shadow:0 9px 20px rgba(189,69,69,.07)}
+.death-page .info-tile{position:relative;overflow:hidden;min-height:106px;box-shadow:0 7px 18px rgba(20,35,60,.04);transition:transform .18s ease,box-shadow .18s ease}
+.death-page .info-tile:before{position:absolute;top:0;left:0;right:0;height:4px;content:'';background:#00209f}
+.death-page .info-tile:nth-child(2):before{background:#009543}
+.death-page .info-tile:nth-child(3):before{background:#000}
+.death-page .info-tile:hover{transform:translateY(-3px);box-shadow:0 12px 24px rgba(20,35,60,.09)}
+.death-page .card{position:relative;overflow:hidden;padding:28px 30px;box-shadow:0 11px 28px rgba(20,35,60,.07)}
+.death-page .card:before{position:absolute;top:0;left:0;right:0;height:4px;content:'';background:#bd4545}
+.death-page .field input:focus,.death-page .field textarea:focus{border-color:#00209f;box-shadow:0 0 0 3px rgba(0,32,159,.1)}
+.death-page .btn-danger{box-shadow:0 8px 18px rgba(189,69,69,.23)}
+.death-page .btn-danger:hover{transform:translateY(-2px)}
+.death-page .alert.success{border-left:4px solid #009543}
+.death-page .alert.error{border-left:4px solid #bd4545}
+@media(max-width:700px){.death-page .hero{padding:24px 20px}.death-page .card{padding:22px 18px}}
 `;
 
 const ReportDeath = () => {

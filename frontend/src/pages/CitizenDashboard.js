@@ -15,6 +15,7 @@ const Icon = ({ name, size = 19 }) => {
     lock: <><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
     plus: <><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="16" /><line x1="8" y1="12" x2="16" y2="12" /></>,
     user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
+    download: <><path d="M12 3v13M7 11l5 5 5-5M5 21h14" /></>,
   };
   return <svg {...common}>{paths[name]}</svg>;
 };
@@ -30,8 +31,46 @@ const styles = `
   .citizen-page .overview-grid { display:grid; grid-template-columns:minmax(0,1.25fr) minmax(250px,.75fr); gap:17px; }.citizen-page .panel { min-width:0; border:1px solid var(--border); border-radius:15px; background:var(--white); box-shadow:0 7px 20px rgba(20,35,60,.04); }.citizen-page .panel-header { padding:18px 20px 0; }.citizen-page .panel-header h2 { color:var(--black); font-size:16px; }.citizen-page .panel-header p { margin-top:5px; color:var(--muted); font-size:11px; }.citizen-page .activity-list { padding:9px 20px 13px; }.citizen-page .activity-row { display:flex; align-items:center; justify-content:space-between; gap:14px; min-height:58px; border-bottom:1px solid #f0f2f5; }.citizen-page .activity-row:last-child { border-bottom:0; }.citizen-page .activity-info { display:flex; align-items:center; gap:10px; min-width:0; }.citizen-page .activity-icon { display:grid; flex:0 0 auto; place-items:center; width:31px; height:31px; color:var(--blue); border-radius:9px; background:var(--blue-soft); }.citizen-page .activity-name { overflow:hidden; color:var(--ink); font-size:12px; font-weight:800; text-overflow:ellipsis; white-space:nowrap; }.citizen-page .activity-meta { margin-top:3px; color:var(--muted); font-size:10px; }.citizen-page .empty { padding:33px 15px; color:var(--muted); text-align:center; font-size:12px; }
   .citizen-page .view-all { display:inline-flex; align-items:center; justify-content:center; gap:6px; width:calc(100% - 40px); min-height:35px; margin:0 20px 17px; color:var(--blue); border:1px solid #cbd6f2; border-radius:9px; background:var(--white); font-size:11px; font-weight:800; }
   .citizen-main { min-width:0; width:calc(100% - 240px); min-height:100vh; margin-left:240px; padding:32px 40px; }
+  .citizen-page .id-card { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:20px; background:linear-gradient(135deg, #00209F, #00166f); border-radius:16px; color:#fff; margin-bottom:25px; box-shadow:0 10px 25px rgba(0,32,159,0.2); }
+  .citizen-page .id-card h3 { margin:0 0 8px 0; font-size:14px; text-transform:uppercase; letter-spacing:0.05em; opacity:0.8; }
+  .citizen-page .id-card .id-number { font-size:22px; font-weight:900; letter-spacing:2px; margin-bottom:4px; }
+  .citizen-page .id-card .id-bc { font-size:12px; opacity:0.8; }
+  .citizen-page .id-card button { display:flex; align-items:center; gap:8px; padding:12px 18px; background:#fff; color:#00209F; border:none; border-radius:8px; font-weight:800; font-size:13px; cursor:pointer; transition:0.2s; }
+  .citizen-page .id-card button:hover { transform:translateY(-2px); background:#edf2ff; }
   @media (max-width:900px) { .citizen-page .service-grid { grid-template-columns:repeat(2,1fr); }.citizen-page .overview-grid { grid-template-columns:1fr; } }
-  @media (max-width:600px) { .citizen-main { width:100%; margin-left:0; padding:22px 16px 32px; }.citizen-page { padding:0; }.citizen-page .hero { align-items:stretch; flex-direction:column; }.citizen-page .profile-card { align-items:flex-start; flex-direction:column; }.citizen-page .service-grid { grid-template-columns:1fr; }.citizen-page .section-heading { align-items:flex-start; flex-direction:column; } }
+  @media (max-width:600px) { .citizen-main { width:100%; margin-left:0; padding:22px 16px 32px; }.citizen-page { padding:0; }.citizen-page .hero { align-items:stretch; flex-direction:column; }.citizen-page .profile-card { align-items:flex-start; flex-direction:column; }.citizen-page .service-grid { grid-template-columns:1fr; }.citizen-page .section-heading { align-items:flex-start; flex-direction:column; }.citizen-page .id-card { flex-direction:column; align-items:flex-start; text-align:left; } }
+
+.citizen-page{padding-bottom:35px}
+.citizen-page .hero{position:relative;overflow:hidden;align-items:center;min-height:188px;padding:30px 32px;margin-bottom:24px;border:1px solid #00166f;border-radius:22px;background:linear-gradient(118deg,#00145f 0%,#00209f 58%,#003dbb 100%);box-shadow:0 18px 40px rgba(0,32,159,.18)}
+.citizen-page .hero:after{position:absolute;right:-88px;bottom:-132px;width:320px;height:320px;content:'';border:45px solid rgba(0,149,67,.34);border-radius:50%}
+.citizen-page .hero>div{position:relative;z-index:1}
+.citizen-page .hero .eyebrow{color:#baf2cf}
+.citizen-page .hero .eyebrow span{background:#20c778;box-shadow:0 0 0 5px rgba(32,199,120,.2)}
+.citizen-page .hero h1{color:#fff;font-size:clamp(28px,3.2vw,42px);letter-spacing:-.055em}
+.citizen-page .hero p{color:rgba(255,255,255,.78);max-width:680px}
+.citizen-page .hero-actions{position:relative;z-index:1}
+.citizen-page .hero .btn-primary{color:#063d22;border-color:#7ce4ad;background:#baf4d2;box-shadow:0 8px 18px rgba(0,0,0,.16)}
+.citizen-page .hero .btn-primary:hover{color:#fff;border-color:#009543;background:#009543}
+.citizen-page .hero .btn-secondary{color:#fff;border-color:rgba(255,255,255,.45);background:rgba(255,255,255,.1)}
+.citizen-page .hero .btn-secondary:hover{color:#00209f;background:#fff}
+.citizen-page .profile-card{position:relative;overflow:hidden;box-shadow:0 10px 25px rgba(20,35,60,.07)}
+.citizen-page .profile-card:before{position:absolute;top:0;left:0;right:0;height:4px;content:'';background:#009543}
+.citizen-page .avatar{box-shadow:0 0 0 4px #e3ecff,0 7px 16px rgba(0,32,159,.12);background:#00209f}
+.citizen-page .profile-status{padding:7px 11px;border-radius:99px;background:#eaf8f0}
+.citizen-page .id-card{position:relative;overflow:hidden;border:1px solid #2755bc;background:linear-gradient(118deg,#00145f,#00209f 62%,#003dbb);box-shadow:0 14px 30px rgba(0,32,159,.2)}
+.citizen-page .id-card:after{position:absolute;right:-45px;bottom:-85px;width:210px;height:210px;content:'';border:30px solid rgba(0,149,67,.35);border-radius:50%}
+.citizen-page .id-card>div,.citizen-page .id-card button{position:relative;z-index:1}
+.citizen-page .id-card button{box-shadow:0 8px 18px rgba(0,0,0,.16)}
+.citizen-page .service-card{position:relative;overflow:hidden;min-height:117px;box-shadow:0 8px 20px rgba(20,35,60,.05)}
+.citizen-page .service-card:before{position:absolute;top:0;left:0;right:0;height:4px;content:'';background:#00209f}
+.citizen-page .service-card:nth-child(2):before{background:#009543}
+.citizen-page .service-card:nth-child(3):before{background:#000}
+.citizen-page .service-card:hover{transform:translateY(-5px);border-color:#9bb3ee;box-shadow:0 15px 28px rgba(0,32,159,.1)}
+.citizen-page .panel{box-shadow:0 10px 26px rgba(20,35,60,.06)}
+.citizen-page .activity-row{transition:background .16s ease;padding-left:4px;padding-right:4px}
+.citizen-page .activity-row:hover{background:#f6f9ff}
+.citizen-page .section-link:hover{color:#009543}
+@media(max-width:600px){.citizen-page .hero{padding:24px 20px}.citizen-page .hero-actions{width:100%;display:grid;grid-template-columns:1fr 1fr}.citizen-page .hero-actions .btn-primary,.citizen-page .hero-actions .btn-secondary{justify-content:center;padding-left:10px;padding-right:10px}}
 `;
 
 const CitizenDashboard = () => {
@@ -53,11 +92,38 @@ const CitizenDashboard = () => {
       .slice(0, 5);
   }, [applications, search]);
 
-  const completed = applications.filter((a) => a.status === 'completed').length;
+  const completed = applications.filter((a) => ['completed', 'approved'].includes(a.status)).length;
   const active = applications.filter((a) => ['submitted', 'pending', 'review', 'ready'].includes(a.status)).length;
   const displayName = profile?.full_name || user?.full_name || 'Citizen';
   const initial = displayName.charAt(0).toUpperCase();
   const picture = profile?.picture_data || user?.picture_data;
+  
+  // Checks for generated identifiers
+  const nationalId = profile?.national_id || user?.national_id;
+  const birthCertNumber = profile?.birth_certificate_number || user?.birth_certificate_number;
+  const userId = profile?.id || user?.id;
+
+  const handleDownloadCertificate = () => {
+    const token = localStorage.getItem('token');
+    // Use fetch to get the blob and force download, ensuring Authorization header is passed
+    fetch(`http://localhost:5000/api/documents/birth-certificate/${userId}`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to download');
+        return res.blob();
+      })
+      .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `BirthCertificate_${birthCertNumber}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      })
+      .catch(err => alert('Error downloading certificate: ' + err.message));
+  };
 
   return (
     <div style={layoutStyles.layout}>
@@ -89,7 +155,7 @@ const CitizenDashboard = () => {
               <div>
                 <div className="profile-name">{displayName}</div>
                 <div className="profile-label">
-                  {user?.national_id ? `National ID · ${user.national_id}` : user?.username ? `Username · ${user.username}` : 'Citizen account'}
+                  {nationalId ? `National ID · ${nationalId}` : user?.username ? `Username · ${user.username}` : 'Citizen account'}
                 </div>
               </div>
             </div>
@@ -97,6 +163,23 @@ const CitizenDashboard = () => {
               <i /> {profile?.status === 'active' ? 'Active' : 'Verified'}
             </div>
           </section>
+
+          {/* NEW: Official Documents Panel */}
+          {(nationalId || birthCertNumber) && (
+            <section className="id-card">
+              <div>
+                <h3>Official Government Documents</h3>
+                {nationalId && <div className="id-number">ID: {nationalId}</div>}
+                {birthCertNumber && <div className="id-bc">Birth Certificate: {birthCertNumber}</div>}
+                {!nationalId && <div className="id-bc">National ID: Pending Generation</div>}
+              </div>
+              {birthCertNumber && (
+                <button onClick={handleDownloadCertificate}>
+                  <Icon name="download" size={16} /> Download Certificate
+                </button>
+              )}
+            </section>
+          )}
 
           <div className="section-heading">
             <div>

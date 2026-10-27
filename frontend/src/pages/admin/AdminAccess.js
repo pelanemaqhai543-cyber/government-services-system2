@@ -2,11 +2,46 @@ import React, { useMemo, useState } from 'react';
 import OfficerLayout from '../../components/OfficerLayout';
 
 const departments = [
-  { role: 'traffic', name: 'Traffic', icon: 'TR', access: ['Driver licence services', 'Vehicle services', 'Authorized citizen information'] },
-  { role: 'finance', name: 'Finance', icon: 'FN', access: ['Tax services', 'Revenue information', 'Authorized financial records'] },
-  { role: 'pension', name: 'Pension', icon: 'PN', access: ['Pension applications', 'Eligibility information', 'Authorized pension records'] },
-  { role: 'police', name: 'Police', icon: 'PL', access: ['Police clearance', 'Background checks', 'Authorized police records'] },
-  { role: 'passport', name: 'Passport', icon: 'PP', access: ['Passport applications', 'Passport renewals', 'Required identity documents'] },
+  {
+    role: 'traffic', name: 'Traffic', icon: 'TR',
+    access: [
+      { label: 'Driver licence services', description: 'Process licence applications, renewals, and related checks.' },
+      { label: 'Vehicle services', description: 'Access authorised registration and vehicle service information.' },
+      { label: 'Citizen identity information', description: 'View only the citizen fields required for traffic services.' },
+    ],
+  },
+  {
+    role: 'finance', name: 'Finance', icon: 'FN',
+    access: [
+      { label: 'Tax services', description: 'Process tax applications and revenue-related requests.' },
+      { label: 'Revenue information', description: 'Review information needed to support public revenue services.' },
+      { label: 'Financial records', description: 'Access authorised financial records on a need-to-know basis.' },
+    ],
+  },
+  {
+    role: 'pension', name: 'Pension', icon: 'PN',
+    access: [
+      { label: 'Pension applications', description: 'Review and process citizen pension applications.' },
+      { label: 'Eligibility information', description: 'Check age, employment, and eligibility information.' },
+      { label: 'Pension records', description: 'Access authorised records required for pension decisions.' },
+    ],
+  },
+  {
+    role: 'police', name: 'Police', icon: 'PL',
+    access: [
+      { label: 'Police clearance', description: 'Process police clearance and certificate requests.' },
+      { label: 'Background checks', description: 'Review information for authorised background investigations.' },
+      { label: 'Police records', description: 'Access authorised police records for official duties.' },
+    ],
+  },
+  {
+    role: 'passport', name: 'Passport', icon: 'PP',
+    access: [
+      { label: 'Passport applications', description: 'Review and process new passport applications.' },
+      { label: 'Passport renewals', description: 'Process passport renewal and replacement requests.' },
+      { label: 'Identity documents', description: 'Verify the identity documents required for passport services.' },
+    ],
+  },
 ];
 
 const Icon = ({ name, size = 19 }) => {
@@ -29,6 +64,28 @@ const styles = `
   .access-page .details-panel { overflow:hidden; }.access-page .details-header { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:22px 24px 19px; border-bottom:1px solid var(--border); }.access-page .details-heading { display:flex; align-items:center; gap:13px; min-width:0; }.access-page .details-badge { display:grid; flex:0 0 auto; place-items:center; width:44px; height:44px; color:var(--white); border-radius:12px; background:var(--blue); font-size:12px; font-weight:900; }.access-page .details-heading h2 { color:var(--black); font-size:20px; letter-spacing:-.03em; }.access-page .details-heading p { margin-top:5px; color:var(--muted); font-size:12px; }.access-page .status-pill { display:inline-flex; align-items:center; gap:6px; min-height:28px; padding:0 9px; color:var(--green-dark); border:1px solid #bfe4cf; border-radius:99px; background:var(--green-soft); font-size:10px; font-weight:800; white-space:nowrap; }.access-page .status-pill i { width:6px; height:6px; border-radius:50%; background:var(--green); }.access-page .permission-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; padding:21px 24px; }.access-page .permission-card { display:flex; align-items:flex-start; gap:11px; min-height:92px; padding:15px; border:1px solid var(--border); border-radius:12px; background:#fcfdff; }.access-page .permission-icon { display:grid; flex:0 0 auto; place-items:center; width:30px; height:30px; color:var(--green); border-radius:8px; background:var(--green-soft); }.access-page .permission-card strong { display:block; color:var(--ink); font-size:12px; line-height:1.35; }.access-page .permission-card p { margin-top:5px; color:var(--muted); font-size:10px; line-height:1.4; }.access-page .security-note { display:flex; align-items:flex-start; gap:10px; margin:0 24px 23px; padding:13px 14px; color:var(--ink); border-left:3px solid var(--black); background:#f5f5f5; font-size:11px; line-height:1.5; }.access-page .security-note svg { flex:0 0 auto; color:var(--black); margin-top:1px; }
   @media (max-width:850px) { .access-page .access-layout { grid-template-columns:1fr; }.access-page .department-panel { padding:16px; }.access-page .department-list { grid-template-columns:repeat(3,1fr); }.access-page .department-button { justify-content:center; flex-direction:column; gap:5px; min-height:72px; padding:8px; text-align:center; font-size:11px; } }
   @media (max-width:600px) { .access-page { padding:0; }.access-page .hero { align-items:stretch; flex-direction:column; }.access-page .overview-strip { gap:9px; }.access-page .overview-card { align-items:flex-start; flex-direction:column; gap:8px; min-height:112px; padding:13px; }.access-page .overview-card strong { font-size:20px; }.access-page .department-list { grid-template-columns:repeat(2,1fr); }.access-page .details-header { align-items:flex-start; flex-direction:column; padding:18px 16px; }.access-page .permission-grid { grid-template-columns:1fr; padding:16px; }.access-page .security-note { margin:0 16px 17px; } }
+
+.access-page{padding-bottom:32px}
+.access-page .hero{position:relative;overflow:hidden;align-items:center;min-height:188px;padding:30px 32px;margin-bottom:24px;border:1px solid #00166f;border-radius:22px;background:linear-gradient(118deg,#00145f 0%,#00209f 58%,#003dbb 100%);box-shadow:0 18px 40px rgba(0,32,159,.18)}
+.access-page .hero:after{position:absolute;right:-88px;bottom:-132px;width:320px;height:320px;content:'';border:45px solid rgba(0,149,67,.34);border-radius:50%}
+.access-page .hero>div{position:relative;z-index:1}
+.access-page .hero .eyebrow{color:#baf2cf}
+.access-page .hero .eyebrow span{background:#20c778;box-shadow:0 0 0 5px rgba(32,199,120,.2)}
+.access-page .hero h1{color:#fff;font-size:clamp(28px,3.2vw,42px);letter-spacing:-.055em}
+.access-page .hero p{color:rgba(255,255,255,.78)}
+.access-page .overview-card{position:relative;overflow:hidden;transition:transform .2s ease,box-shadow .2s ease}
+.access-page .overview-card:before{position:absolute;top:0;left:0;right:0;height:4px;content:'';background:#00209f}
+.access-page .overview-card:nth-child(2):before{background:#009543}
+.access-page .overview-card:nth-child(3):before{background:#000}
+.access-page .overview-card:hover{transform:translateY(-4px);box-shadow:0 14px 27px rgba(20,35,60,.1)}
+.access-page .panel{box-shadow:0 10px 26px rgba(20,35,60,.06)}
+.access-page .department-button{min-height:54px}
+.access-page .department-button.active{box-shadow:0 6px 14px rgba(0,32,159,.09)}
+.access-page .details-header{background:linear-gradient(135deg,#fbfdff,#f3f6ff)}
+.access-page .details-badge{background:#00209f;box-shadow:0 0 0 5px #edf2ff}
+.access-page .permission-card{transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+.access-page .permission-card:hover{transform:translateY(-3px);border-color:#b7c8f2;box-shadow:0 9px 18px rgba(0,32,159,.08)}
+.access-page .security-note{border-left-color:#009543;background:linear-gradient(100deg,#edf8f1,#f4f6ff)}
 `;
 
 const AdminAccess = () => {
@@ -54,7 +111,7 @@ const AdminAccess = () => {
           <article className="panel details-panel">
             {department && <>
               <div className="details-header"><div className="details-heading"><span className="details-badge">{department.icon}</span><div><h2>{department.name} Department</h2><p>Authorized information and services</p></div></div><span className="status-pill"><i /> Access active</span></div>
-              <div className="permission-grid">{department.access.map((permission) => <div className="permission-card" key={permission}><span className="permission-icon"><Icon name="check" size={16} /></span><div><strong>{permission}</strong><p>Access is controlled by the department role.</p></div></div>)}</div>
+              <div className="permission-grid">{department.access.map((permission) => <div className="permission-card" key={permission.label}><span className="permission-icon"><Icon name="check" size={16} /></span><div><strong>{permission.label}</strong><p>{permission.description}</p></div></div>)}</div>
               <div className="security-note"><Icon name="info" size={16} /><span>Department employees must only access information required for their authorized government services. All access is subject to security and privacy policies.</span></div>
             </>}
           </article>

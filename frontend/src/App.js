@@ -9,7 +9,6 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import EmployeeDashboard from './pages/EmployeeDashboard';
 
 // =====================================================
 // CITIZEN PAGES
@@ -41,6 +40,12 @@ import OfficerRequests from './pages/officer/OfficerRequests';
 import OfficerSearch from './pages/officer/OfficerSearch';
 import OfficerHistory from './pages/officer/OfficerHistory';
 
+// Role groups (the backend gives admin the same access as home_affairs)
+const CITIZEN = ['citizen'];
+const ADMIN_ONLY = ['admin'];
+const HOME_AFFAIRS_ROLES = ['home_affairs', 'admin'];
+const OFFICER_ROLES = ['traffic', 'finance', 'pension', 'police', 'passport'];
+
 function App() {
   return (
     <AuthProvider>
@@ -59,48 +64,40 @@ function App() {
           <Route path="/register" element={<Register />} />
 
           {/* =================================================
-              CITIZEN DASHBOARD
+              CITIZEN PAGES
           ================================================== */}
           <Route
             path="/dashboard"
             element={
-              <ProtectedRoute allowedRoles={['citizen']}>
+              <ProtectedRoute allowedRoles={CITIZEN}>
                 <CitizenDashboard />
               </ProtectedRoute>
             }
           />
 
-          {/* =================================================
-              APPLY FOR SERVICE
-          ================================================== */}
           <Route
             path="/apply"
             element={
-              <ProtectedRoute allowedRoles={['citizen']}>
+              <ProtectedRoute allowedRoles={CITIZEN}>
                 <Apply />
               </ProtectedRoute>
             }
           />
 
-          {/* =================================================
-              MY PROFILE
-          ================================================== */}
           <Route
             path="/profile"
             element={
-              <ProtectedRoute allowedRoles={['citizen']}>
+              <ProtectedRoute allowedRoles={CITIZEN}>
                 <Profile />
               </ProtectedRoute>
             }
           />
 
-          {/* =================================================
-              LEGACY CITIZEN PAGES
-          ================================================== */}
+          {/* Legacy citizen pages */}
           <Route
             path="/new-request"
             element={
-              <ProtectedRoute allowedRoles={['citizen']}>
+              <ProtectedRoute allowedRoles={CITIZEN}>
                 <NewRequest />
               </ProtectedRoute>
             }
@@ -109,7 +106,7 @@ function App() {
           <Route
             path="/renewal"
             element={
-              <ProtectedRoute allowedRoles={['citizen']}>
+              <ProtectedRoute allowedRoles={CITIZEN}>
                 <Renewal />
               </ProtectedRoute>
             }
@@ -118,7 +115,7 @@ function App() {
           <Route
             path="/track"
             element={
-              <ProtectedRoute allowedRoles={['citizen']}>
+              <ProtectedRoute allowedRoles={CITIZEN}>
                 <TrackRequest />
               </ProtectedRoute>
             }
@@ -127,7 +124,7 @@ function App() {
           <Route
             path="/history"
             element={
-              <ProtectedRoute allowedRoles={['citizen']}>
+              <ProtectedRoute allowedRoles={CITIZEN}>
                 <TrackRequest />
               </ProtectedRoute>
             }
@@ -136,21 +133,30 @@ function App() {
           <Route
             path="/services"
             element={
-              <ProtectedRoute allowedRoles={['citizen']}>
+              <ProtectedRoute allowedRoles={CITIZEN}>
                 <GovernmentServices />
               </ProtectedRoute>
             }
           />
 
           {/* =================================================
-              ADMIN DASHBOARD
+              ADMIN
               Role: admin
           ================================================== */}
           <Route
             path="/admin"
             element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={ADMIN_ONLY}>
                 <AdminDashboard />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/admin/applications"
+            element={
+              <ProtectedRoute allowedRoles={ADMIN_ONLY}>
+                <AdminApplications />
               </ProtectedRoute>
             }
           />
@@ -158,7 +164,7 @@ function App() {
           <Route
             path="/admin/verify"
             element={
-              <ProtectedRoute allowedRoles={['admin', 'home_affairs']}>
+              <ProtectedRoute allowedRoles={HOME_AFFAIRS_ROLES}>
                 <AdminVerify />
               </ProtectedRoute>
             }
@@ -167,7 +173,7 @@ function App() {
           <Route
             path="/admin/requests"
             element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={ADMIN_ONLY}>
                 <AdminRequests />
               </ProtectedRoute>
             }
@@ -176,30 +182,38 @@ function App() {
           <Route
             path="/admin/access"
             element={
-              <ProtectedRoute allowedRoles={['admin']}>
+              <ProtectedRoute allowedRoles={ADMIN_ONLY}>
                 <AdminAccess />
               </ProtectedRoute>
             }
           />
 
+          <Route
+            path="/admin/report-death"
+            element={
+              <ProtectedRoute allowedRoles={ADMIN_ONLY}>
+                <ReportDeath />
+              </ProtectedRoute>
+            }
+          />
+
           {/* =================================================
-              HOME AFFAIRS ADMIN / OFFICER
-              Role: home_affairs
+              HOME AFFAIRS
+              Roles: home_affairs, admin
           ================================================== */}
           <Route
             path="/home-affairs"
             element={
-              <ProtectedRoute allowedRoles={['home_affairs']}>
+              <ProtectedRoute allowedRoles={HOME_AFFAIRS_ROLES}>
                 <AdminDashboard />
               </ProtectedRoute>
             }
           />
 
-          {/* Home Affairs — Cross-department applications view (NEW) */}
           <Route
             path="/home-affairs/applications"
             element={
-              <ProtectedRoute allowedRoles={['home_affairs']}>
+              <ProtectedRoute allowedRoles={HOME_AFFAIRS_ROLES}>
                 <AdminApplications />
               </ProtectedRoute>
             }
@@ -208,7 +222,7 @@ function App() {
           <Route
             path="/home-affairs/verify"
             element={
-              <ProtectedRoute allowedRoles={['home_affairs']}>
+              <ProtectedRoute allowedRoles={HOME_AFFAIRS_ROLES}>
                 <AdminVerify />
               </ProtectedRoute>
             }
@@ -217,7 +231,7 @@ function App() {
           <Route
             path="/home-affairs/requests"
             element={
-              <ProtectedRoute allowedRoles={['home_affairs']}>
+              <ProtectedRoute allowedRoles={HOME_AFFAIRS_ROLES}>
                 <AdminRequests />
               </ProtectedRoute>
             }
@@ -226,17 +240,16 @@ function App() {
           <Route
             path="/home-affairs/access"
             element={
-              <ProtectedRoute allowedRoles={['home_affairs']}>
+              <ProtectedRoute allowedRoles={HOME_AFFAIRS_ROLES}>
                 <AdminAccess />
               </ProtectedRoute>
             }
           />
 
-          {/* Home Affairs - Report Citizen Death */}
           <Route
             path="/home-affairs/report-death"
             element={
-              <ProtectedRoute allowedRoles={['home_affairs']}>
+              <ProtectedRoute allowedRoles={HOME_AFFAIRS_ROLES}>
                 <ReportDeath />
               </ProtectedRoute>
             }
@@ -249,17 +262,16 @@ function App() {
           <Route
             path="/officer/dashboard"
             element={
-              <ProtectedRoute allowedRoles={['traffic', 'finance', 'pension', 'police', 'passport']}>
+              <ProtectedRoute allowedRoles={OFFICER_ROLES}>
                 <OfficerDashboard />
               </ProtectedRoute>
             }
           />
 
-          {/* Officer — Citizen applications queue (NEW) */}
           <Route
             path="/officer/applications"
             element={
-              <ProtectedRoute allowedRoles={['traffic', 'finance', 'pension', 'police', 'passport']}>
+              <ProtectedRoute allowedRoles={OFFICER_ROLES}>
                 <OfficerApplications />
               </ProtectedRoute>
             }
@@ -268,7 +280,7 @@ function App() {
           <Route
             path="/officer/requests"
             element={
-              <ProtectedRoute allowedRoles={['traffic', 'finance', 'pension', 'police', 'passport']}>
+              <ProtectedRoute allowedRoles={OFFICER_ROLES}>
                 <OfficerRequests />
               </ProtectedRoute>
             }
@@ -277,7 +289,7 @@ function App() {
           <Route
             path="/officer/search"
             element={
-              <ProtectedRoute allowedRoles={['traffic', 'finance', 'pension', 'police', 'passport']}>
+              <ProtectedRoute allowedRoles={OFFICER_ROLES}>
                 <OfficerSearch />
               </ProtectedRoute>
             }
@@ -286,7 +298,7 @@ function App() {
           <Route
             path="/officer/history"
             element={
-              <ProtectedRoute allowedRoles={['traffic', 'finance', 'pension', 'police', 'passport']}>
+              <ProtectedRoute allowedRoles={OFFICER_ROLES}>
                 <OfficerHistory />
               </ProtectedRoute>
             }

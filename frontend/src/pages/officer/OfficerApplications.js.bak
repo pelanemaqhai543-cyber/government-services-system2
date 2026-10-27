@@ -1,0 +1,379 @@
+import React, { useEffect, useState } from 'react';
+import OfficerLayout from '../../components/OfficerLayout';
+import API from '../../utils/api';
+
+const STATUS_OPTIONS = ['submitted', 'review', 'ready', 'completed', 'rejected'];
+
+const STATUS_COLORS = {
+  submitted: { bg: '#ede9fe', color: '#6d28d9' },
+  review:    { bg: '#fef3c7', color: '#b45309' },
+  ready:     { bg: '#e0f2fe', color: '#0369a1' },
+  completed: { bg: '#dcfce7', color: '#15803d' },
+  rejected:  { bg: '#fee2e2', color: '#b91c1c' },
+};
+
+const Icon = ({ name, size = 18 }) => {
+  const c = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  const p = {
+    search: <><circle cx="10.8" cy="10.8" r="6.5" /><path d="m16 16 4.5 4.5" /></>,
+    doc: <><path d="M6 3.5h8l4 4V20.5H6z" /><path d="M14 3.5v4h4M9 12h6M9 16h6" /></>,
+    download: <><path d="M12 3v13M7 11l5 5 5-5M5 21h14" /></>,
+    close: <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>,
+  };
+  return <svg {...c}>{p[name]}</svg>;
+};
+
+const styles = `
+  .officer-apps { --blue:#00209F; --blue-dark:#00166f; --blue-soft:#edf2ff; --green:#009543; --green-dark:#007936; --green-soft:#eaf8f0; --red:#bd4545; --red-soft:#fff1f1; --black:#000; --ink:#172235; --muted:#718096; --border:#e5e9f0; --white:#fff; width:100%; color:var(--ink); }
+  .officer-apps * { box-sizing:border-box; }
+  .officer-apps h1, .officer-apps h2, .officer-apps h3, .officer-apps p { margin:0; }
+  .officer-apps button { font:inherit; cursor:pointer; }
+  .officer-apps .hero { display:flex; align-items:flex-end; justify-content:space-between; gap:22px; margin-bottom:24px; flex-wrap:wrap; }
+  .officer-apps .eyebrow { display:flex; align-items:center; gap:9px; margin-bottom:9px; color:var(--blue); font-size:11px; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }
+  .officer-apps .eyebrow span { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 0 5px var(--green-soft); }
+  .officer-apps h1 { color:var(--black); font-size:clamp(25px,3vw,32px); letter-spacing:-.04em; }
+  .officer-apps .hero p { margin-top:9px; color:var(--muted); font-size:14px; }
+  .officer-apps .refresh { display:inline-flex; align-items:center; gap:8px; padding:10px 16px; color:var(--blue); border:1px solid #cbd6f2; background:#fff; border-radius:10px; font-size:12.5px; font-weight:800; }
+  .officer-apps .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
+  .officer-apps .metric { padding:16px 18px; background:#fff; border:1px solid var(--border); border-radius:14px; }
+  .officer-apps .metric span { font-size:11px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .officer-apps .metric strong { display:block; margin-top:5px; font-size:24px; color:var(--black); }
+  .officer-apps .filters { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px; }
+  .officer-apps .search { flex:1; min-width:220px; padding:11px 14px; border:1px solid var(--border); border-radius:10px; font-size:13px; background:#fff; outline:none; }
+  .officer-apps .search:focus { border-color:var(--blue); box-shadow:0 0 0 3px var(--blue-soft); }
+  .officer-apps .chips { display:flex; gap:6px; flex-wrap:wrap; }
+  .officer-apps .chip { padding:7px 14px; border:1px solid var(--border); background:#fff; border-radius:99px; font-size:11.5px; font-weight:800; color:var(--muted); text-transform:capitalize; }
+  .officer-apps .chip.active { background:var(--blue); color:#fff; border-color:var(--blue); }
+  .officer-apps .table-wrap { background:#fff; border:1px solid var(--border); border-radius:14px; overflow:hidden; }
+  .officer-apps .table-head { display:grid; grid-template-columns:1.5fr 1.6fr 1.2fr 0.8fr 1fr 1.2fr; gap:12px; padding:14px 20px; background:#f7f9fc; border-bottom:1px solid var(--border); font-size:11px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .officer-apps .row { display:grid; grid-template-columns:1.5fr 1.6fr 1.2fr 0.8fr 1fr 1.2fr; gap:12px; padding:16px 20px; border-bottom:1px solid #f0f2f5; align-items:center; font-size:13px; }
+  .officer-apps .row:hover { background:#fafbfe; }
+  .officer-apps .ref { font-weight:800; color:var(--blue); }
+  .officer-apps .citizen-cell { display:flex; align-items:center; gap:10px; min-width:0; }
+  .officer-apps .mini-avatar { width:32px; height:32px; border-radius:50%; background:var(--blue); color:#fff; display:grid; place-items:center; font-size:12px; font-weight:800; overflow:hidden; flex-shrink:0; }
+  .officer-apps .mini-avatar img { width:100%; height:100%; object-fit:cover; }
+  .officer-apps .badge { display:inline-block; padding:4px 10px; border-radius:99px; font-size:11px; font-weight:800; text-transform:capitalize; }
+  .officer-apps .view-btn { padding:7px 12px; background:var(--blue); color:#fff; border:none; border-radius:8px; font-size:11.5px; font-weight:800; }
+  .officer-apps .view-btn:hover { background:var(--blue-dark); }
+  .officer-apps .empty { padding:60px 20px; text-align:center; color:var(--muted); font-size:13px; }
+
+  /* MODAL */
+  .officer-apps .overlay { position:fixed; inset:0; background:rgba(10,20,40,.55); display:flex; align-items:center; justify-content:center; padding:20px; z-index:1000; }
+  .officer-apps .modal { background:#fff; border-radius:18px; width:min(720px,100%); max-height:90vh; overflow-y:auto; box-shadow:0 30px 80px rgba(0,0,0,.25); }
+  .officer-apps .modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:24px 26px 18px; border-bottom:1px solid var(--border); }
+  .officer-apps .modal-head h2 { font-size:19px; }
+  .officer-apps .modal-head p { margin-top:6px; color:var(--muted); font-size:12.5px; }
+  .officer-apps .close { background:transparent; border:none; color:var(--muted); padding:6px; }
+  .officer-apps .modal-body { padding:22px 26px; }
+  .officer-apps .applicant-card { display:flex; align-items:center; gap:14px; padding:14px; background:#f7f9fc; border:1px solid var(--border); border-radius:12px; margin-bottom:20px; }
+  .officer-apps .applicant-avatar { width:52px; height:52px; border-radius:50%; background:var(--blue); color:#fff; display:grid; place-items:center; font-size:20px; font-weight:800; overflow:hidden; flex-shrink:0; }
+  .officer-apps .applicant-avatar img { width:100%; height:100%; object-fit:cover; }
+  .officer-apps .applicant-name { font-size:15px; font-weight:800; color:var(--ink); }
+  .officer-apps .applicant-meta { font-size:12px; color:var(--muted); margin-top:3px; }
+  .officer-apps .detail-section { margin-bottom:20px; }
+  .officer-apps .detail-section h3 { font-size:12px; font-weight:800; color:var(--blue); text-transform:uppercase; letter-spacing:.1em; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+  .officer-apps .field-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+  .officer-apps .field label { display:block; font-size:11px; font-weight:800; color:var(--muted); margin-bottom:4px; text-transform:capitalize; }
+  .officer-apps .field div { font-size:13.5px; color:var(--ink); }
+  .officer-apps .doc-list { display:grid; gap:8px; }
+  .officer-apps .doc { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:#f7f9fc; border:1px solid var(--border); border-radius:10px; font-size:12.5px; }
+  .officer-apps .doc strong { font-weight:700; }
+  .officer-apps .doc a { color:var(--blue); text-decoration:none; font-size:11.5px; font-weight:800; }
+  .officer-apps .status-selector { display:flex; gap:8px; flex-wrap:wrap; }
+  .officer-apps .status-btn { padding:9px 14px; border:1px solid var(--border); background:#fff; border-radius:9px; font-size:12px; font-weight:800; text-transform:capitalize; }
+  .officer-apps .status-btn.active { background:var(--blue); color:#fff; border-color:var(--blue); }
+  .officer-apps .rejection-input { width:100%; padding:11px 14px; border:1px solid var(--border); border-radius:10px; font-size:13px; font-family:inherit; min-height:70px; margin-top:10px; }
+  .officer-apps .modal-foot { display:flex; gap:10px; justify-content:flex-end; padding:18px 26px 22px; border-top:1px solid var(--border); }
+  .officer-apps .btn { padding:11px 20px; border-radius:10px; font-size:13px; font-weight:800; border:1px solid transparent; }
+  .officer-apps .btn-secondary { background:#fff; color:var(--blue); border-color:#cbd6f2; }
+  .officer-apps .btn-primary { background:var(--blue); color:#fff; border-color:var(--blue); }
+  .officer-apps .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+
+  @media (max-width:900px) {
+    .officer-apps .metrics { grid-template-columns:repeat(2,1fr); }
+    .officer-apps .table-head, .officer-apps .row { grid-template-columns:1fr 1fr; }
+    .officer-apps .table-head span:nth-child(n+3), .officer-apps .row > *:nth-child(n+3) { display:none; }
+    .officer-apps .field-grid { grid-template-columns:1fr; }
+  }
+`;
+
+const OfficerApplications = () => {
+  const [apps, setApps] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(null);
+  const [newStatus, setNewStatus] = useState('');
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const loadQueue = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const res = await API.get('/applications/officer/queue');
+      setApps(res.data || []);
+    } catch (err) {
+      setError(err.response?.data?.message || 'Unable to load applications.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadQueue(); }, []);
+
+  const openApp = async (id) => {
+    try {
+      const res = await API.get(`/applications/officer/${id}`);
+      setSelected(res.data);
+      setNewStatus(res.data.status);
+      setRejectionReason(res.data.rejection_reason || '');
+    } catch (err) {
+      alert('Unable to load application details.');
+    }
+  };
+
+  const saveStatus = async () => {
+    if (!newStatus) return;
+    if (newStatus === 'rejected' && rejectionReason.trim().length < 5) {
+      alert('Please provide a rejection reason (at least 5 characters).');
+      return;
+    }
+    setSaving(true);
+    try {
+      await API.put(`/applications/officer/${selected.id}/status`, {
+        status: newStatus,
+        rejection_reason: newStatus === 'rejected' ? rejectionReason : null,
+      });
+      setSelected(null);
+      loadQueue();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Unable to update status.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const filtered = apps.filter((a) => {
+    if (statusFilter !== 'all' && a.status !== statusFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const match =
+        String(a.reference_number || '').toLowerCase().includes(q) ||
+        String(a.citizen_name || '').toLowerCase().includes(q) ||
+        String(a.citizen_id || '').toLowerCase().includes(q) ||
+        String(a.citizen_username || '').toLowerCase().includes(q) ||
+        String(a.service_type || '').toLowerCase().includes(q);
+      if (!match) return false;
+    }
+    return true;
+  });
+
+  const metrics = {
+    total: apps.length,
+    submitted: apps.filter((a) => a.status === 'submitted').length,
+    review: apps.filter((a) => a.status === 'review').length,
+    completed: apps.filter((a) => a.status === 'completed').length,
+  };
+
+  return (
+    <OfficerLayout
+      title="Citizen Applications"
+      subtitle="Review and process applications submitted through the portal."
+    >
+      <style>{styles}</style>
+      <div className="officer-apps">
+
+        <header className="hero">
+          <div>
+            <div className="eyebrow"><span /> Department queue</div>
+            <h1>Applications</h1>
+            <p>Every application submitted by citizens assigned to your department.</p>
+          </div>
+          <button className="refresh" onClick={loadQueue}>↻ Refresh queue</button>
+        </header>
+
+        <section className="metrics">
+          <div className="metric"><span>Total</span><strong>{metrics.total}</strong></div>
+          <div className="metric"><span>Submitted</span><strong>{metrics.submitted}</strong></div>
+          <div className="metric"><span>In review</span><strong>{metrics.review}</strong></div>
+          <div className="metric"><span>Completed</span><strong>{metrics.completed}</strong></div>
+        </section>
+
+        <div className="filters">
+          <input
+            className="search"
+            placeholder="Search by reference, citizen, service…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <div className="chips">
+            {['all', 'submitted', 'review', 'ready', 'completed', 'rejected'].map((s) => (
+              <button
+                key={s}
+                className={`chip ${statusFilter === s ? 'active' : ''}`}
+                onClick={() => setStatusFilter(s)}
+              >
+                {s === 'all' ? 'All' : s}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {error && <div style={{ padding: 14, background: '#fbeff0', color: '#a23c3c', borderRadius: 10, marginBottom: 14 }}>⚠ {error}</div>}
+
+        <div className="table-wrap">
+          <div className="table-head">
+            <span>Reference</span>
+            <span>Citizen</span>
+            <span>Service</span>
+            <span>Docs</span>
+            <span>Status</span>
+            <span>Action</span>
+          </div>
+
+          {loading ? (
+            <div className="empty">Loading applications…</div>
+          ) : filtered.length === 0 ? (
+            <div className="empty">No applications found.</div>
+          ) : (
+            filtered.map((a) => (
+              <div className="row" key={a.id}>
+                <span className="ref">{a.reference_number}</span>
+                <span className="citizen-cell">
+                  <span className="mini-avatar">
+                    {a.citizen_picture
+                      ? <img src={a.citizen_picture} alt="" />
+                      : (a.citizen_name || '?').charAt(0).toUpperCase()}
+                  </span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {a.citizen_name || a.citizen_id || a.citizen_username || '—'}
+                  </span>
+                </span>
+                <span>{a.service_type}</span>
+                <span>{a.document_count || 0}</span>
+                <span>
+                  <span className="badge" style={STATUS_COLORS[a.status] || {}}>{a.status}</span>
+                </span>
+                <span><button className="view-btn" onClick={() => openApp(a.id)}>Review →</button></span>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* DETAIL MODAL */}
+        {selected && (
+          <div className="overlay" onClick={() => setSelected(null)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <div>
+                  <h2>{selected.service_type}</h2>
+                  <p>Ref: <strong>{selected.reference_number}</strong></p>
+                </div>
+                <button className="close" onClick={() => setSelected(null)}><Icon name="close" size={20} /></button>
+              </div>
+
+              <div className="modal-body">
+                {/* Applicant card with avatar */}
+                <div className="applicant-card">
+                  <div className="applicant-avatar">
+                    {selected.citizen_picture
+                      ? <img src={selected.citizen_picture} alt="" />
+                      : (selected.citizen_name || '?').charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="applicant-name">{selected.citizen_name || '—'}</div>
+                    <div className="applicant-meta">
+                      {selected.citizen_id ? `ID: ${selected.citizen_id}` : ''}
+                      {selected.citizen_username ? ` · @${selected.citizen_username}` : ''}
+                    </div>
+                    {selected.citizen_email && <div className="applicant-meta">{selected.citizen_email}</div>}
+                  </div>
+                </div>
+
+                {/* Form data */}
+                {selected.form_data && Object.keys(selected.form_data).length > 0 && (
+                  <div className="detail-section">
+                    <h3>Application details</h3>
+                    <div className="field-grid">
+                      {Object.entries(selected.form_data).map(([k, v]) => (
+                        <div className="field" key={k}>
+                          <label>{k.replace(/_/g, ' ')}</label>
+                          <div>{String(v || '—')}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Documents */}
+                {selected.documents && selected.documents.length > 0 ? (
+                  <div className="detail-section">
+                    <h3>Supporting documents ({selected.documents.length})</h3>
+                    <div className="doc-list">
+                      {selected.documents.map((d) => (
+                        <div className="doc" key={d.id}>
+                          <span><Icon name="doc" size={14} /> <strong>{d.file_name}</strong> ({d.file_size ? Math.round(d.file_size / 1024) : 0} KB)</span>
+                          <a href={d.file_data} download={d.file_name}>Download ↓</a>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="detail-section">
+                    <h3>Supporting documents</h3>
+                    <div style={{ padding: '14px', background: '#f7f9fc', border: '1px dashed #cbd5e1', borderRadius: '10px', color: '#718096', fontSize: '13px', textAlign: 'center' }}>
+                      No supporting documents uploaded with this application.
+                    </div>
+                  </div>
+                )}
+
+                {/* Notes */}
+                {selected.notes && (
+                  <div className="detail-section">
+                    <h3>Notes from citizen</h3>
+                    <div style={{ fontSize: 13, color: '#172235', lineHeight: 1.6 }}>{selected.notes}</div>
+                  </div>
+                )}
+
+                {/* Status update */}
+                <div className="detail-section">
+                  <h3>Update status</h3>
+                  <div className="status-selector">
+                    {STATUS_OPTIONS.map((s) => (
+                      <button
+                        key={s}
+                        className={`status-btn ${newStatus === s ? 'active' : ''}`}
+                        onClick={() => setNewStatus(s)}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                  {newStatus === 'rejected' && (
+                    <textarea
+                      className="rejection-input"
+                      placeholder="Reason for rejection…"
+                      value={rejectionReason}
+                      onChange={(e) => setRejectionReason(e.target.value)}
+                    />
+                  )}
+                </div>
+              </div>
+
+              <div className="modal-foot">
+                <button className="btn btn-secondary" onClick={() => setSelected(null)}>Cancel</button>
+                <button className="btn btn-primary" onClick={saveStatus} disabled={saving || newStatus === selected.status}>
+                  {saving ? 'Saving…' : 'Save status'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </OfficerLayout>
+  );
+};
+
+export default OfficerApplications;

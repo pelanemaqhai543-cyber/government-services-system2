@@ -39,8 +39,9 @@ const styles = `
   .verify-page .section-heading p { margin-top:5px; color:var(--muted); font-size:12px; }
   .verify-page .citizen-row { display:flex; align-items:center; gap:15px; padding:17px 22px; border-top:1px solid var(--border); }
   .verify-page .citizen-row:first-child { border-top:0; }
-  .verify-page .avatar { display:grid; flex:0 0 auto; place-items:center; width:44px; height:44px; color:#fff; border-radius:50%; background:var(--blue); font-weight:800; font-size:15px; }
+  .verify-page .avatar { display:grid; flex:0 0 auto; place-items:center; width:44px; height:44px; color:#fff; border-radius:50%; background:var(--blue); font-weight:800; font-size:15px; overflow:hidden; }
   .verify-page .avatar.deceased { background:var(--red); }
+  .verify-page .avatar img { width:100%; height:100%; object-fit:cover; border-radius:50%; }
   .verify-page .citizen-info { flex:1; min-width:0; }
   .verify-page .citizen-info strong { display:block; overflow:hidden; font-size:13.5px; text-overflow:ellipsis; white-space:nowrap; }
   .verify-page .citizen-info span { display:block; overflow:hidden; margin-top:4px; color:var(--muted); font-size:11.5px; text-overflow:ellipsis; white-space:nowrap; }
@@ -55,6 +56,32 @@ const styles = `
     .verify-page .metrics { grid-template-columns:1fr; gap:9px; }
     .verify-page .citizen-row { flex-direction:column; align-items:flex-start; padding:15px 16px; }
   }
+
+.verify-page{padding-bottom:32px}
+.verify-page .hero{position:relative;overflow:hidden;align-items:center;min-height:188px;padding:30px 32px;margin-bottom:22px;border:1px solid #00166f;border-radius:22px;background:linear-gradient(118deg,#00145f 0%,#00209f 58%,#003dbb 100%);box-shadow:0 18px 40px rgba(0,32,159,.18)}
+.verify-page .hero:after{position:absolute;right:-88px;bottom:-132px;width:320px;height:320px;content:'';border:45px solid rgba(0,149,67,.34);border-radius:50%}
+.verify-page .hero>div{position:relative;z-index:1}
+.verify-page .hero .eyebrow{color:#baf2cf}
+.verify-page .hero .eyebrow span{background:#20c778;box-shadow:0 0 0 5px rgba(32,199,120,.2)}
+.verify-page .hero h1{color:#fff;font-size:clamp(28px,3.2vw,42px);letter-spacing:-.055em}
+.verify-page .hero p{color:rgba(255,255,255,.78)}
+.verify-page .refresh-button{position:relative;z-index:1;color:#063d22;border-color:#7ce4ad;background:#baf4d2;box-shadow:0 8px 18px rgba(0,0,0,.15)}
+.verify-page .refresh-button:hover{color:#fff;background:#009543}
+.verify-page .notice-banner{padding:17px 20px;border-left:5px solid #009543;border-radius:12px;background:linear-gradient(100deg,#edf8f1,#f1f5ff);color:#23405a;box-shadow:0 8px 20px rgba(20,35,60,.05)}
+.verify-page .notice-banner svg{color:#009543}
+.verify-page .metric{position:relative;overflow:hidden;min-height:112px;transition:transform .2s ease,box-shadow .2s ease}
+.verify-page .metric:before{position:absolute;top:0;left:0;right:0;height:4px;content:'';background:#00209f}
+.verify-page .metric:nth-child(2):before{background:#009543}
+.verify-page .metric:nth-child(3):before{background:#000}
+.verify-page .metric:hover{transform:translateY(-4px);box-shadow:0 14px 27px rgba(20,35,60,.1)}
+.verify-page .metric-icon{box-shadow:inset 0 0 0 1px #dbe5ff}
+.verify-page .panel{overflow:hidden;box-shadow:0 10px 26px rgba(20,35,60,.06)}
+.verify-page .section-heading h2{color:#000;letter-spacing:-.035em}
+.verify-page .citizen-row{transition:background .18s ease,padding-left .18s ease}
+.verify-page .citizen-row:hover{background:#f6f9ff;padding-left:27px}
+.verify-page .avatar{background:#00209f;box-shadow:0 0 0 4px #edf2ff}
+.verify-page .status-pill.active{color:#007936;background:#e8f7ef}
+.verify-page .status-pill.deceased{color:#991b1b;background:#fff0f0}
 `;
 
 const AdminVerify = () => {
@@ -145,7 +172,9 @@ const AdminVerify = () => {
               return (
                 <div className="citizen-row" key={citizen.id}>
                   <div className={`avatar ${status === 'deceased' ? 'deceased' : ''}`}>
-                    {name.charAt(0).toUpperCase()}
+                    {citizen.picture_data
+                      ? <img src={citizen.picture_data} alt={name} />
+                      : name.charAt(0).toUpperCase()}
                   </div>
                   <div className="citizen-info">
                     <strong>{name}</strong>

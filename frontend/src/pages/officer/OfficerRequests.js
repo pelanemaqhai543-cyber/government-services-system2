@@ -1,20 +1,31 @@
-import React, { useEffect, useMemo, useState } from 'react';
+﻿import React, { useEffect, useState } from 'react';
 import OfficerLayout from '../../components/OfficerLayout';
-import RequestTable from '../../components/RequestTable';
 import API from '../../utils/api';
+import AISummaryPanel from '../../components/AISummaryPanel';
 
-const STATUSES = ['all', 'submitted', 'review', 'ready', 'completed', 'rejected'];
+const STATUSES = ['all', 'submitted', 'pending', 'review', 'ready', 'approved', 'completed', 'rejected'];
+
+const STATUS_COLORS = {
+  submitted: { bg: '#ede9fe', color: '#6d28d9' },
+  pending:   { bg: '#fef3c7', color: '#b45309' },
+  review:    { bg: '#fef3c7', color: '#b45309' },
+  ready:     { bg: '#e0f2fe', color: '#0369a1' },
+  approved:  { bg: '#dcfce7', color: '#15803d' },
+  completed: { bg: '#dcfce7', color: '#15803d' },
+  rejected:  { bg: '#fee2e2', color: '#b91c1c' },
+};
 
 const Icon = ({ name, size = 18 }) => {
-  const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true };
-  const paths = {
+  const c = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' };
+  const p = {
     search: <><circle cx="10.8" cy="10.8" r="6.5" /><path d="m16 16 4.5 4.5" /></>,
     refresh: <><path d="M20 11a8 8 0 0 0-14.8-3L3 11" /><path d="M3 5v6h6" /><path d="M4 13a8 8 0 0 0 14.8 3L21 13" /><path d="M21 19v-6h-6" /></>,
-    document: <><path d="M6 3.5h8l4 4V20.5H6z" /><path d="M14 3.5v4h4M9 12h6M9 16h6" /></>,
+    doc: <><path d="M6 3.5h8l4 4V20.5H6z" /><path d="M14 3.5v4h4M9 12h6M9 16h6" /></>,
     clock: <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></>,
     check: <path d="m5 12 4 4L19 6" />,
+    close: <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>,
   };
-  return <svg {...common}>{paths[name]}</svg>;
+  return <svg {...c}>{p[name]}</svg>;
 };
 
 const styles = `
@@ -24,9 +35,68 @@ const styles = `
   .requests-page .refresh-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:40px; padding:0 14px; color:var(--blue); border:1px solid #cbd6f2; border-radius:10px; background:var(--white); font-size:12px; font-weight:800; }.requests-page .refresh-button:hover { background:var(--blue-soft); }
   .requests-page .summary-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:13px; margin-bottom:20px; }.requests-page .summary-card { display:flex; align-items:center; gap:12px; min-height:88px; padding:16px; border:1px solid var(--border); border-radius:14px; background:var(--white); box-shadow:0 7px 20px rgba(20,35,60,.045); }.requests-page .summary-icon { display:grid; place-items:center; width:38px; height:38px; color:var(--blue); border-radius:10px; background:var(--blue-soft); }.requests-page .summary-card:nth-child(3) .summary-icon,.requests-page .summary-card:nth-child(4) .summary-icon { color:var(--green); background:var(--green-soft); }.requests-page .summary-card span { display:block; color:var(--muted); font-size:11px; font-weight:700; }.requests-page .summary-card strong { display:block; margin-top:3px; color:var(--black); font-size:23px; line-height:1; }
   .requests-page .filter-panel { padding:18px; border:1px solid var(--border); border-radius:15px; background:var(--white); box-shadow:0 7px 20px rgba(20,35,60,.04); }.requests-page .filter-heading { display:flex; align-items:center; justify-content:space-between; gap:15px; margin-bottom:13px; }.requests-page .filter-heading h2 { color:var(--black); font-size:15px; }.requests-page .filter-heading span { color:var(--muted); font-size:11px; }.requests-page .search-wrap { position:relative; }.requests-page .search-wrap svg { position:absolute; top:50%; left:14px; color:var(--blue); transform:translateY(-50%); }.requests-page .search { width:100%; min-height:44px; padding:0 16px 0 42px; color:var(--ink); outline:none; border:1px solid var(--border); border-radius:10px; background:#fbfcff; font-size:13px; }.requests-page .search:focus { border-color:#a9bde9; box-shadow:0 0 0 3px var(--blue-soft); }.requests-page .search::placeholder { color:#9aa6b8; }.requests-page .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:13px; }.requests-page .chip { min-height:32px; padding:0 13px; color:var(--muted); border:1px solid var(--border); border-radius:99px; background:var(--white); font-size:11px; font-weight:800; text-transform:capitalize; transition:.18s ease; }.requests-page .chip:hover { color:var(--blue); border-color:#b9c9ee; background:var(--blue-soft); }.requests-page .chip.active { color:var(--white); border-color:var(--blue); background:var(--blue); box-shadow:0 5px 12px rgba(0,32,159,.16); }
-  .requests-page .table-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:15px; margin:24px 0 12px; }.requests-page .table-heading h2 { color:var(--black); font-size:18px; letter-spacing:-.03em; }.requests-page .table-heading p { margin-top:5px; color:var(--muted); font-size:12px; }.requests-page .table-panel { overflow:auto; padding:4px; border:1px solid var(--border); border-radius:15px; background:var(--white); box-shadow:0 7px 20px rgba(20,35,60,.04); }.requests-page .table-panel > * { min-width:680px; }.requests-page .empty-state { padding:44px 20px; color:var(--muted); text-align:center; font-size:13px; }
+  .requests-page .table-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:15px; margin:24px 0 12px; }.requests-page .table-heading h2 { color:var(--black); font-size:18px; letter-spacing:-.03em; }.requests-page .table-heading p { margin-top:5px; color:var(--muted); font-size:12px; }.requests-page .table-panel { overflow:auto; padding:4px; border:1px solid var(--border); border-radius:15px; background:var(--white); box-shadow:0 7px 20px rgba(20,35,60,.04); }.requests-page .table-panel > * { min-width:800px; }.requests-page .empty-state { padding:44px 20px; color:var(--muted); text-align:center; font-size:13px; }
   @media (max-width:900px) { .requests-page .summary-grid { grid-template-columns:repeat(2,1fr); } }
   @media (max-width:600px) { .requests-page { padding:0; }.requests-page .hero { align-items:stretch; flex-direction:column; }.requests-page .refresh-button { width:100%; }.requests-page .summary-grid { gap:9px; }.requests-page .summary-card { align-items:flex-start; flex-direction:column; gap:8px; min-height:112px; padding:13px; }.requests-page .summary-card strong { font-size:21px; }.requests-page .filter-panel { padding:14px; }.requests-page .filter-heading { align-items:flex-start; flex-direction:column; gap:4px; }.requests-page .table-heading { align-items:flex-start; flex-direction:column; } }
+
+  /* MODAL STYLES */
+  .requests-page .overlay { position:fixed; inset:0; background:rgba(10,20,40,.55); display:flex; align-items:center; justify-content:center; padding:20px; z-index:1000; }
+  .requests-page .modal { background:#fff; border-radius:18px; width:min(720px,100%); max-height:90vh; overflow-y:auto; box-shadow:0 30px 80px rgba(0,0,0,.25); }
+  .requests-page .modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:24px 26px 18px; border-bottom:1px solid var(--border); }
+  .requests-page .modal-head h2 { font-size:19px; }
+  .requests-page .modal-head p { margin-top:6px; color:var(--muted); font-size:12.5px; }
+  .requests-page .close { background:transparent; border:none; color:var(--muted); padding:6px; }
+  .requests-page .modal-body { padding:22px 26px; }
+  .requests-page .applicant-card { display:flex; align-items:center; gap:14px; padding:14px; background:#f7f9fc; border:1px solid var(--border); border-radius:12px; margin-bottom:20px; }
+  .requests-page .applicant-avatar { width:52px; height:52px; border-radius:50%; background:var(--blue); color:#fff; display:grid; place-items:center; font-size:20px; font-weight:800; overflow:hidden; flex-shrink:0; }
+  .requests-page .applicant-avatar img { width:100%; height:100%; object-fit:cover; }
+  .requests-page .applicant-name { font-size:15px; font-weight:800; color:var(--ink); }
+  .requests-page .applicant-meta { font-size:12px; color:var(--muted); margin-top:3px; }
+  .requests-page .detail-section { margin-bottom:20px; }
+  .requests-page .detail-section h3 { font-size:12px; font-weight:800; color:var(--blue); text-transform:uppercase; letter-spacing:.1em; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+  .requests-page .field-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
+  .requests-page .field label { display:block; font-size:11px; font-weight:800; color:var(--muted); margin-bottom:4px; text-transform:capitalize; }
+  .requests-page .field div { font-size:13.5px; color:var(--ink); }
+  .requests-page .doc-list { display:grid; gap:8px; }
+  .requests-page .doc { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:#f7f9fc; border:1px solid var(--border); border-radius:10px; font-size:12.5px; }
+  .requests-page .doc a { color:var(--blue); text-decoration:none; font-size:11.5px; font-weight:800; }
+  .requests-page .modal-foot { padding:18px 26px 22px; border-top:1px solid var(--border); display:flex; justify-content:flex-end; gap:10px; }
+  .requests-page .btn { padding:11px 20px; border-radius:10px; font-size:13px; font-weight:800; border:1px solid transparent; cursor:pointer; }
+  .requests-page .btn-secondary { background:#fff; color:var(--blue); border-color:#cbd6f2; }
+  .requests-page .btn-primary { background:var(--blue); color:#fff; border-color:var(--blue); }
+
+.requests-page{padding-bottom:32px}
+.requests-page .hero{position:relative;overflow:hidden;align-items:center;min-height:188px;padding:30px 32px;margin-bottom:24px;border:1px solid #00166f;border-radius:22px;background:linear-gradient(118deg,#00145f 0%,#00209f 58%,#003dbb 100%);box-shadow:0 18px 40px rgba(0,32,159,.18)}
+.requests-page .hero:after{position:absolute;right:-88px;bottom:-132px;width:320px;height:320px;content:'';border:45px solid rgba(0,149,67,.34);border-radius:50%}
+.requests-page .hero>div{position:relative;z-index:1}
+.requests-page .hero .eyebrow{color:#baf2cf}
+.requests-page .hero .eyebrow span{background:#20c778;box-shadow:0 0 0 5px rgba(32,199,120,.2)}
+.requests-page .hero h1{color:#fff;font-size:clamp(28px,3.2vw,42px);letter-spacing:-.055em}
+.requests-page .hero p{color:rgba(255,255,255,.78)}
+.requests-page .hero .refresh-button{position:relative;z-index:1;color:#063d22;border-color:#7ce4ad;background:#baf4d2;box-shadow:0 8px 18px rgba(0,0,0,.16)}
+.requests-page .hero .refresh-button:hover{color:#fff;border-color:#009543;background:#009543}
+.requests-page .summary-card{position:relative;overflow:hidden;transition:transform .2s ease,box-shadow .2s ease}
+.requests-page .summary-card:before{position:absolute;top:0;left:0;right:0;height:4px;content:'';background:#00209f}
+.requests-page .summary-card:nth-child(2):before{background:#000}
+.requests-page .summary-card:nth-child(3):before,.requests-page .summary-card:nth-child(4):before{background:#009543}
+.requests-page .summary-card:hover{transform:translateY(-4px);box-shadow:0 14px 27px rgba(20,35,60,.1)}
+.requests-page .filter-panel,.requests-page .table-panel{box-shadow:0 10px 26px rgba(20,35,60,.06)}
+.requests-page .filter-heading h2,.requests-page .table-heading h2{letter-spacing:-.035em}
+.requests-page .chip{min-height:34px}
+.requests-page .chip.active{background:#00209f}
+.requests-page .table-panel table thead th{background:#00209f!important;color:#fff!important;border-bottom:0!important}
+.requests-page .table-panel table tbody tr{transition:background .16s ease}
+.requests-page .table-panel table tbody tr:hover{background:#f6f9ff}
+.requests-page .modal{border:1px solid #cbd8fa;box-shadow:0 28px 80px rgba(0,0,0,.28)}
+.requests-page .modal-head{background:linear-gradient(135deg,#fbfdff,#f3f6ff)}
+.requests-page .applicant-card{background:linear-gradient(100deg,#edf2ff,#f5fbf7);border-color:#d6e0f2}
+.requests-page .applicant-avatar{box-shadow:0 0 0 4px #e4ebff}
+.requests-page .detail-section h3{color:#00209f}
+.requests-page .doc{transition:border-color .16s ease,background .16s ease}
+.requests-page .doc:hover{border-color:#b6c8f2;background:#f4f7ff}
+.requests-page .btn-primary{background:#00209f}
+.requests-page .btn-primary:hover{background:#00166f}
+@media(max-width:600px){.requests-page .hero{padding:24px 20px}}
 `;
 
 const OfficerRequests = () => {
@@ -35,13 +105,22 @@ const OfficerRequests = () => {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selected, setSelected] = useState(null);
 
   const load = async () => {
     try {
       setLoading(true);
       setError('');
-      const response = await API.get('/requests/queue');
-      setRows(response.data || []);
+      // UPDATED: Fetching from the AI Master Queue
+      const response = await API.get('/ai/master-queue');
+      const data = response.data.applications || [];
+      
+      setRows(data.map((row) => ({
+        ...row,
+        citizen_name: row.full_name || row.citizen_name,
+        citizen_id: row.national_id || row.citizen_id,
+        citizen_picture: row.picture_data,
+      })));
     } catch (error) {
       console.error('Failed to load request queue:', error);
       setError('Unable to load the request queue. Please try again.');
@@ -52,18 +131,29 @@ const OfficerRequests = () => {
 
   useEffect(() => { load(); }, []);
 
-  const filtered = rows.filter((row) => {
-    const matchesStatus = status === 'all' || row.status === status;
+  const openApp = (id) => {
+    const row = rows.find((item) => item.id === id);
+    if (row) setSelected(row);
+  };
+
+  const filtered = React.useMemo(() => {
     const query = search.trim().toLowerCase();
-    const matchesSearch = !query || String(row.national_id || '').toLowerCase().includes(query) || String(row.reference_number || '').toLowerCase().includes(query);
-    return matchesStatus && matchesSearch;
-  });
+    return rows.filter((row) => {
+      const matchesStatus = status === 'all' || row.status === status;
+      const matchesSearch = !query || 
+        String(row.citizen_name || '').toLowerCase().includes(query) || 
+        String(row.citizen_id || '').toLowerCase().includes(query) || 
+        String(row.reference_number || '').toLowerCase().includes(query) || 
+        String(row.service_type || '').toLowerCase().includes(query);
+      return matchesStatus && matchesSearch;
+    });
+  }, [rows, status, search]);
 
   const summary = {
     total: rows.length,
     pending: rows.filter((row) => ['submitted', 'pending'].includes(row.status)).length,
     review: rows.filter((row) => ['review', 'in_review'].includes(row.status)).length,
-    completed: rows.filter((row) => row.status === 'completed').length,
+    completed: rows.filter((row) => ['completed', 'approved'].includes(row.status)).length,
   };
 
   const handleStatusChange = async (id, newStatus) => {
@@ -76,7 +166,7 @@ const OfficerRequests = () => {
   };
 
   const summaryCards = [
-    { label: 'Total requests', value: summary.total, icon: 'document' },
+    { label: 'Total requests', value: summary.total, icon: 'doc' },
     { label: 'Pending', value: summary.pending, icon: 'clock' },
     { label: 'In review', value: summary.review, icon: 'search' },
     { label: 'Completed', value: summary.completed, icon: 'check' },
@@ -86,13 +176,201 @@ const OfficerRequests = () => {
     <OfficerLayout title="Request Queue" subtitle="Filter, review and update applications assigned to your department.">
       <style>{styles}</style>
       <div className="requests-page">
-        <header className="hero"><div><div className="eyebrow"><span /> Application operations</div><h1>Request Queue</h1><p>Filter, review, and update applications assigned to your department from one aligned workspace.</p></div><button className="refresh-button" type="button" onClick={load}><Icon name="refresh" size={16} /> Refresh queue</button></header>
+        <header className="hero">
+          <div>
+            <div className="eyebrow"><span /> Application operations</div>
+            <h1>Request Queue</h1>
+            <p>Filter, review, and update applications assigned to your department from one aligned workspace.</p>
+          </div>
+          <button className="refresh-button" type="button" onClick={load}><Icon name="refresh" size={16} /> Refresh queue</button>
+        </header>
 
-        <section className="summary-grid" aria-label="Request summary">{summaryCards.map((card) => <article className="summary-card" key={card.label}><span className="summary-icon"><Icon name={card.icon} size={18} /></span><span><span>{card.label}</span><strong>{loading ? '—' : card.value}</strong></span></article>)}</section>
+        <section className="summary-grid" aria-label="Request summary">
+          {summaryCards.map((card) => (
+            <article className="summary-card" key={card.label}>
+              <span className="summary-icon"><Icon name={card.icon} size={18} /></span>
+              <span><span>{card.label}</span><strong>{loading ? '—' : card.value}</strong></span>
+            </article>
+          ))}
+        </section>
 
-        <section className="filter-panel" aria-label="Request filters"><div className="filter-heading"><h2>Find an application</h2><span>{filtered.length} result{filtered.length === 1 ? '' : 's'} shown</span></div><div className="search-wrap"><Icon name="search" size={17} /><input className="search" placeholder="Search by national ID or reference number" value={search} onChange={(event) => setSearch(event.target.value)} /></div><div className="chips" role="group" aria-label="Filter by status">{STATUSES.map((value) => <button key={value} type="button" className={`chip${status === value ? ' active' : ''}`} onClick={() => setStatus(value)}>{value === 'all' ? 'All requests' : value.replace('_', ' ')}</button>)}</div></section>
+        <section className="filter-panel" aria-label="Request filters">
+          <div className="filter-heading">
+            <h2>Find an application</h2>
+            <span>{filtered.length} result{filtered.length === 1 ? '' : 's'} shown</span>
+          </div>
+          <div className="search-wrap">
+            <Icon name="search" size={17} />
+            <input className="search" placeholder="Search by name, National ID, or reference number" value={search} onChange={(event) => setSearch(event.target.value)} />
+          </div>
+          <div className="chips" role="group" aria-label="Filter by status">
+            {STATUSES.map((value) => (
+              <button key={value} type="button" className={`chip${status === value ? ' active' : ''}`} onClick={() => setStatus(value)}>
+                {value === 'all' ? 'All requests' : value.replace('_', ' ')}
+              </button>
+            ))}
+          </div>
+        </section>
 
-        <div className="table-heading"><div><h2>Applications</h2><p>Review the latest requests and update their processing status.</p></div></div><section className="table-panel">{error ? <div className="empty-state"><p>{error}</p><button className="refresh-button" type="button" onClick={load}>Try again</button></div> : <RequestTable requests={filtered} rows={filtered} loading={loading} onStatusChange={handleStatusChange} />}</section>
+        <div className="table-heading">
+          <div>
+            <h2>Applications</h2>
+            <p>Review the latest requests and update their processing status.</p>
+          </div>
+        </div>
+        
+        <section className="table-panel">
+          {error ? (
+            <div className="empty-state">
+              <p>{error}</p>
+              <button className="refresh-button" type="button" onClick={load}>Try again</button>
+            </div>
+          ) : loading ? (
+            <div className="empty-state">Loading applications...</div>
+          ) : filtered.length === 0 ? (
+            <div className="empty-state">No applications found.</div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#f7f9fc', borderBottom: '1px solid #e5e9f0' }}>
+                  <th style={{ textAlign: 'left', padding: '14px 20px', fontSize: 11, fontWeight: 800, color: '#718096', textTransform: 'uppercase', letterSpacing: '.05em' }}>Reference</th>
+                  <th style={{ textAlign: 'left', padding: '14px 20px', fontSize: 11, fontWeight: 800, color: '#718096', textTransform: 'uppercase', letterSpacing: '.05em' }}>Citizen</th>
+                  <th style={{ textAlign: 'left', padding: '14px 20px', fontSize: 11, fontWeight: 800, color: '#718096', textTransform: 'uppercase', letterSpacing: '.05em' }}>Service</th>
+                  <th style={{ textAlign: 'left', padding: '14px 20px', fontSize: 11, fontWeight: 800, color: '#718096', textTransform: 'uppercase', letterSpacing: '.05em' }}>AI Instructions</th>
+                  <th style={{ textAlign: 'right', padding: '14px 20px', fontSize: 11, fontWeight: 800, color: '#718096', textTransform: 'uppercase', letterSpacing: '.05em' }}>Status</th>
+                  <th style={{ textAlign: 'right', padding: '14px 20px', fontSize: 11, fontWeight: 800, color: '#718096', textTransform: 'uppercase', letterSpacing: '.05em' }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((a) => (
+                  <tr key={a.id} style={{ borderBottom: '1px solid #f0f2f5' }}>
+                    <td style={{ padding: '16px 20px', fontWeight: 800, color: '#00209F' }}>{a.reference_number}</td>
+                    <td style={{ padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ width: 32, height: 32, borderRadius: '50%', background: '#00209F', color: '#fff', display: 'grid', placeItems: 'center', fontSize: 12, fontWeight: 800, overflow: 'hidden', flexShrink: 0 }}>
+                        {a.citizen_picture ? <img src={a.citizen_picture} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (a.citizen_name || '?').charAt(0).toUpperCase()}
+                      </span>
+                      {a.citizen_name || a.citizen_id || '—'}
+                    </td>
+                    <td style={{ padding: '16px 20px' }}>{a.service_type}</td>
+                    
+                    {/* AI INSTRUCTIONS COLUMN */}
+                    <td style={{ padding: '16px 20px', maxWidth: '300px' }}>
+                      <div style={{ fontWeight: '700', color: '#172235', marginBottom: '4px', fontSize: '12px' }}>
+                        {a.ai_summary}
+                      </div>
+                      <div style={{ fontSize: '11.5px', color: a.ai_recommendation === 'approve' ? '#15803d' : '#b45309', fontWeight: '600' }}>
+                        {a.ai_instructions}
+                      </div>
+                    </td>
+
+                    <td style={{ padding: '16px 20px', textAlign: 'right' }}>
+                      <span style={{ ...STATUS_COLORS[a.status], padding: '4px 10px', borderRadius: 99, fontSize: 11, fontWeight: 800, textTransform: 'capitalize' }}>
+                        {a.status}
+                      </span>
+                    </td>
+                    <td style={{ padding: '16px 20px', textAlign: 'right' }}>
+                      <button 
+                        onClick={() => openApp(a.id)}
+                        style={{ padding: '7px 12px', background: '#00209F', color: '#fff', border: 'none', borderRadius: 8, fontSize: 11.5, fontWeight: 800, cursor: 'pointer' }}
+                      >
+                        Review →
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+
+        {/* DETAIL MODAL */}
+        {selected && (
+          <div className="overlay" onClick={() => setSelected(null)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <div className="modal-head">
+                <div>
+                  <h2>{selected.service_type}</h2>
+                  <p>Ref: <strong>{selected.reference_number}</strong></p>
+                </div>
+                <button className="close" onClick={() => setSelected(null)}><Icon name="close" size={20} /></button>
+              </div>
+              <div className="modal-body">
+                <AISummaryPanel applicationId={selected.id} />
+
+                <div className="applicant-card">
+                  <div className="applicant-avatar">
+                    {selected.citizen_picture ? <img src={selected.citizen_picture} alt="" /> : (selected.citizen_name || '?').charAt(0).toUpperCase()}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div className="applicant-name">{selected.citizen_name || '—'}</div>
+                    <div className="applicant-meta">
+                      {selected.citizen_id ? `ID: ${selected.citizen_id}` : ''}
+                      {selected.citizen_username ? ` · @${selected.citizen_username}` : ''}
+                    </div>
+                  </div>
+                </div>
+
+                {selected.form_data && Object.keys(selected.form_data).length > 0 && (
+                  <div className="detail-section">
+                    <h3>Application details</h3>
+                    <div className="field-grid">
+                      {Object.entries(selected.form_data).map(([k, v]) => (
+                        <div className="field" key={k}>
+                          <label>{k.replace(/_/g, ' ')}</label>
+                          <div>{String(v || '—')}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {selected.documents && selected.documents.length > 0 ? (
+                  <div className="detail-section">
+                    <h3>Supporting documents ({selected.documents.length})</h3>
+                    <div className="doc-list">
+                      {selected.documents.map((d) => (
+                        <div className="doc" key={d.id}>
+                          <span><Icon name="doc" size={14} /> <strong>{d.file_name}</strong></span>
+                          <a href={d.file_path || d.file_url} target="_blank" rel="noreferrer">Download ↓</a>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="detail-section">
+                    <h3>Supporting documents</h3>
+                    <div style={{ padding: '14px', background: '#f7f9fc', border: '1px dashed #cbd5e1', borderRadius: '10px', color: '#718096', fontSize: '13px', textAlign: 'center' }}>
+                      No supporting documents uploaded with this application.
+                    </div>
+                  </div>
+                )}
+
+                <div className="detail-section">
+                  <h3>Update status</h3>
+                  <select
+                    value={selected.status}
+                    onChange={(e) => {
+                      handleStatusChange(selected.id, e.target.value);
+                      setSelected({ ...selected, status: e.target.value });
+                    }}
+                    style={{ padding: '10px 14px', borderRadius: 10, border: '1px solid #e5e9f0', fontSize: 13, background: '#fff', width: '100%' }}
+                  >
+                    <option value="submitted">Submitted</option>
+                    <option value="pending">Pending</option>
+                    <option value="review">In review</option>
+                    <option value="ready">Ready</option>
+                    <option value="approved">Approved</option>
+                    <option value="completed">Completed</option>
+                    <option value="rejected">Rejected</option>
+                  </select>
+                </div>
+              </div>
+              <div className="modal-foot">
+                <button className="btn btn-secondary" onClick={() => setSelected(null)}>Close</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </OfficerLayout>
   );

@@ -1,73 +1,908 @@
+
 import React, { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
 import API from '../utils/api';
 
-const DEPARTMENTS = ['home_affairs', 'traffic', 'finance', 'pension', 'police', 'passport'];
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+const MAX_FILES = 5;
 
-const Icon = ({ name, size = 19 }) => {
-  const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true };
-  const paths = {
-    document: <><path d="M6 3.5h8l4 4V20.5H6z" /><path d="M14 3.5v4h4M9 12h6M9 16h6" /></>,
-    upload: <><path d="M12 16V4M7 9l5-5 5 5" /><path d="M5 20h14" /></>,
-    arrow: <><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></>,
-  };
-  return <svg {...common}>{paths[name]}</svg>;
-};
+const ALLOWED_TYPES = [
+  'application/pdf',
+  'image/jpeg',
+  'image/png',
+];
 
-const styles = `
-  .request-page { --blue:#00209F; --blue-dark:#00166f; --blue-soft:#edf2ff; --green:#009543; --green-dark:#007936; --green-soft:#eaf8f0; --black:#000; --ink:#172235; --muted:#718096; --border:#e5e9f0; --white:#fff; width:min(100%,1440px); margin:0 auto; padding:0 2px; color:var(--ink); }
-  .request-page * { box-sizing:border-box; }.request-page button,.request-page input,.request-page select,.request-page textarea { font:inherit; }.request-page button { cursor:pointer; }.request-page h1,.request-page h2,.request-page p { margin:0; }
-  .request-page .hero { display:flex; align-items:flex-end; justify-content:space-between; gap:22px; margin-bottom:25px; }.request-page .eyebrow { display:flex; align-items:center; gap:9px; margin-bottom:9px; color:var(--blue); font-size:11px; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }.request-page .eyebrow span { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 0 5px var(--green-soft); }.request-page h1 { color:var(--black); font-size:clamp(25px,3vw,34px); line-height:1.1; letter-spacing:-.04em; }.request-page .hero p { margin-top:9px; color:var(--muted); font-size:14px; line-height:1.55; }
-  .request-page .request-layout { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(260px,.65fr); align-items:start; gap:18px; }.request-page .panel { min-width:0; border:1px solid var(--border); border-radius:16px; background:var(--white); box-shadow:0 7px 20px rgba(20,35,60,.045); }.request-page .form-panel { padding:24px; }.request-page .form-panel h2,.request-page .guide-panel h2 { color:var(--black); font-size:17px; }.request-page .form-panel > p,.request-page .guide-panel > p { margin-top:5px; color:var(--muted); font-size:12px; line-height:1.5; }.request-page .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; margin-top:22px; }.request-page .field { display:grid; gap:7px; }.request-page .field.full { grid-column:1/-1; }.request-page .field label { color:var(--ink); font-size:11px; font-weight:800; }.request-page .field label b { color:var(--green); }.request-page input,.request-page select,.request-page textarea { width:100%; color:var(--ink); border:1px solid var(--border); border-radius:10px; outline:none; background:#fbfcff; font-size:12px; }.request-page input,.request-page select { min-height:44px; padding:0 13px; }.request-page textarea { min-height:105px; padding:12px 13px; resize:vertical; }.request-page input:focus,.request-page select:focus,.request-page textarea:focus { border-color:#a9bde9; box-shadow:0 0 0 3px var(--blue-soft); }.request-page .upload-box { display:flex; align-items:center; justify-content:center; min-height:105px; padding:16px; border:1px dashed #aebde8; border-radius:10px; background:var(--blue-soft); }.request-page .upload-label { display:flex; align-items:center; gap:8px; color:var(--blue); font-size:12px; font-weight:800; cursor:pointer; }.request-page .file-name { margin-top:6px; color:var(--green-dark); font-size:10px; text-align:center; }.request-page .message { margin-top:17px; padding:11px 13px; border-radius:10px; font-size:11px; line-height:1.45; }.request-page .message.success { color:var(--green-dark); border:1px solid #bfe4cf; background:var(--green-soft); }.request-page .message.error { color:#9b3d3d; border:1px solid #f0caca; background:#fff3f3; }.request-page .form-actions { display:flex; justify-content:flex-end; gap:10px; margin-top:22px; padding-top:18px; border-top:1px solid #f0f2f5; }.request-page .primary-button,.request-page .secondary-button { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:42px; padding:0 17px; border-radius:10px; font-size:12px; font-weight:800; }.request-page .primary-button { color:var(--white); border:1px solid var(--blue); background:var(--blue); box-shadow:0 7px 16px rgba(0,32,159,.17); }.request-page .primary-button:hover { background:var(--blue-dark); }.request-page .secondary-button { color:var(--blue); border:1px solid #cbd6f2; background:var(--white); }
-  .request-page .guide-panel { padding:21px; }.request-page .guide-list { display:grid; gap:14px; margin-top:20px; }.request-page .guide-item { display:flex; align-items:flex-start; gap:10px; }.request-page .guide-number { display:grid; flex:0 0 auto; place-items:center; width:30px; height:30px; color:var(--blue); border-radius:9px; background:var(--blue-soft); font-size:12px; font-weight:900; }.request-page .guide-item:nth-child(2) .guide-number { color:var(--green); background:var(--green-soft); }.request-page .guide-item:nth-child(3) .guide-number { color:var(--black); background:#f2f2f2; }.request-page .guide-item strong { display:block; color:var(--ink); font-size:12px; }.request-page .guide-item p { margin-top:4px; color:var(--muted); font-size:10px; line-height:1.45; }.request-page .notice { margin-top:22px; padding:13px; color:var(--ink); border-left:3px solid var(--green); background:#f7fbf8; font-size:11px; line-height:1.5; }
-  .request-main { min-width:0; width:calc(100% - 240px); min-height:100vh; margin-left:240px; padding:32px 40px; }.request-main .request-page { max-width:1440px; }
-  @media (max-width:900px) { .request-page .request-layout { grid-template-columns:1fr; }.request-page .request-main { width:100%; } }
-  @media (max-width:600px) { .request-main { width:100%; margin-left:0; padding:22px 16px 32px; }.request-page { padding:0; }.request-page .hero { align-items:stretch; flex-direction:column; }.request-page .form-panel { padding:18px 16px; }.request-page .form-grid { grid-template-columns:1fr; gap:14px; }.request-page .field.full { grid-column:auto; }.request-page .form-actions { flex-direction:column-reverse; }.request-page .primary-button,.request-page .secondary-button { width:100%; } }
-`;
+const DEPARTMENTS = [
+  { value: 'home_affairs', label: 'Home Affairs' },
+  { value: 'traffic', label: 'Traffic Services' },
+  { value: 'finance', label: 'Finance and Tax Services' },
+  { value: 'pension', label: 'Pension Services' },
+  { value: 'police', label: 'Police Services' },
+  { value: 'passport', label: 'Passport Services' },
+];
 
-const NewRequest = () => {
-  const [params] = useSearchParams();
+const SERVICES = [
+  { value: 'National ID Application', department: 'home_affairs' },
+  { value: 'Birth Certificate Application', department: 'home_affairs' },
+  { value: 'Identity Registration', department: 'home_affairs' },
+  { value: 'Passport Application', department: 'passport' },
+  { value: 'Driver Licence Application', department: 'traffic' },
+  { value: 'Tax Services', department: 'finance' },
+  { value: 'Pension Application', department: 'pension' },
+  { value: 'Police Clearance', department: 'police' },
+];
+
+export default function NewRequest() {
   const navigate = useNavigate();
-  const [form, setForm] = useState({ service_type: params.get('service') || '', department: '', notes: '' });
-  const [file, setFile] = useState(null);
-  const [msg, setMsg] = useState({ type: '', text: '' });
+
+  const [form, setForm] = useState({
+    service_type: '',
+    department: '',
+    notes: '',
+  });
+
+  const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState({ type: '', text: '' });
+  const [referenceNumber, setReferenceNumber] = useState('');
+
+  const availableServices = SERVICES.filter(
+    (service) =>
+      !form.department || service.department === form.department
+  );
 
   const handleChange = (event) => {
-    setForm((current) => ({ ...current, [event.target.name]: event.target.value }));
+    const { name, value } = event.target;
+
     setMsg({ type: '', text: '' });
+
+    if (name === 'department') {
+      setForm((previous) => ({
+        ...previous,
+        department: value,
+        service_type: '',
+      }));
+      return;
+    }
+
+    setForm((previous) => ({
+      ...previous,
+      [name]: value,
+    }));
+  };
+
+  const handleFiles = (event) => {
+    const selectedFiles = Array.from(event.target.files || []);
+
+    setMsg({ type: '', text: '' });
+
+    if (files.length + selectedFiles.length > MAX_FILES) {
+      setMsg({
+        type: 'error',
+        text: `You can upload a maximum of ${MAX_FILES} files.`,
+      });
+      event.target.value = '';
+      return;
+    }
+
+    for (const file of selectedFiles) {
+      if (!ALLOWED_TYPES.includes(file.type)) {
+        setMsg({
+          type: 'error',
+          text: `${file.name}: only PDF, JPG and PNG files are allowed.`,
+        });
+        event.target.value = '';
+        return;
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        setMsg({
+          type: 'error',
+          text: `${file.name}: the file must not exceed 10 MB.`,
+        });
+        event.target.value = '';
+        return;
+      }
+
+      const duplicate = files.some(
+        (existing) =>
+          existing.name === file.name &&
+          existing.size === file.size &&
+          existing.lastModified === file.lastModified
+      );
+
+      if (duplicate) {
+        setMsg({
+          type: 'error',
+          text: `${file.name} has already been selected.`,
+        });
+        event.target.value = '';
+        return;
+      }
+    }
+
+    setFiles((previous) => [...previous, ...selectedFiles]);
+    event.target.value = '';
+  };
+
+  const removeFile = (indexToRemove) => {
+    setFiles((previous) =>
+      previous.filter((_, index) => index !== indexToRemove)
+    );
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
-    if (!form.service_type || !form.department) {
-      setMsg({ type: 'error', text: 'Please select a service type and department.' });
+
+    if (loading) return;
+
+    if (!form.department || !form.service_type) {
+      setMsg({
+        type: 'error',
+        text: 'Please select a department and service.',
+      });
       return;
     }
+
+    const matchingService = SERVICES.find(
+      (service) => service.value === form.service_type
+    );
+
+    if (
+      !matchingService ||
+      matchingService.department !== form.department
+    ) {
+      setMsg({
+        type: 'error',
+        text: 'The selected service does not match the department.',
+      });
+      return;
+    }
+
+    if (files.length > MAX_FILES) {
+      setMsg({
+        type: 'error',
+        text: `You can upload a maximum of ${MAX_FILES} files.`,
+      });
+      return;
+    }
+
     try {
       setLoading(true);
-      const response = await API.post('/requests', form);
-      setMsg({ type: 'success', text: `Request submitted successfully. Reference: ${response.data?.reference_number || 'created'}.` });
-      setTimeout(() => navigate('/track'), 1800);
+      setMsg({ type: '', text: '' });
+      setReferenceNumber('');
+
+      const data = new FormData();
+
+      data.append('service_type', form.service_type);
+      data.append('department', form.department);
+      data.append('notes', form.notes.trim());
+
+      files.forEach((file) => {
+        data.append('documents', file);
+      });
+
+      const response = await API.post('/requests', data);
+
+      const reference =
+        response.data?.reference_number ||
+        response.data?.request?.reference_number ||
+        response.data?.data?.reference_number ||
+        '';
+
+      if (!reference) {
+        setMsg({
+          type: 'success',
+          text:
+            'The server responded to your submission. Check your request history to confirm the reference number.',
+        });
+        return;
+      }
+
+      setReferenceNumber(reference);
+
+      setMsg({
+        type: 'success',
+        text: 'Your request was submitted successfully.',
+      });
+
+      setForm({
+        service_type: '',
+        department: '',
+        notes: '',
+      });
+
+      setFiles([]);
     } catch (error) {
-      setMsg({ type: 'error', text: error.response?.data?.message || 'Submission failed. Please try again.' });
+      const status = error.response?.status;
+      const serverMessage = error.response?.data?.message;
+
+      setMsg({
+        type: 'error',
+        text:
+          serverMessage ||
+          (status === 401
+            ? 'Your session may have expired. Please log in again.'
+            : status === 403
+            ? 'You do not have permission to submit this request.'
+            : status === 413
+            ? 'The uploaded files are too large.'
+            : 'Request submission failed. Check your connection and try again.'),
+      });
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={layoutStyles.layout}><Sidebar /><main className="request-main"><style>{styles}</style><div className="request-page">
-      <header className="hero"><div><div className="eyebrow"><span /> Citizen services</div><h1>New request</h1><p>Submit an application for a government service and track its progress from your dashboard.</p></div></header>
-      <div className="request-layout">
-        <section className="panel form-panel"><h2>Request details</h2><p>Complete the form below and the responsible department will review your application.</p><form onSubmit={handleSubmit} noValidate><div className="form-grid"><div className="field"><label htmlFor="service_type">Service type <b>*</b></label><input id="service_type" name="service_type" placeholder="e.g. Driver's licence" value={form.service_type} onChange={handleChange} required /></div><div className="field"><label htmlFor="department">Department <b>*</b></label><select id="department" name="department" value={form.department} onChange={handleChange} required><option value="">Select department</option>{DEPARTMENTS.map((department) => <option key={department} value={department}>{department.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</option>)}</select></div><div className="field full"><label>Supporting documents</label><div className="upload-box"><input id="file-upload" type="file" hidden onChange={(event) => setFile(event.target.files?.[0] || null)} /><label className="upload-label" htmlFor="file-upload"><Icon name="upload" size={18} />{file ? file.name : 'Choose a supporting file'}</label></div></div><div className="field full"><label htmlFor="notes">Notes</label><textarea id="notes" name="notes" placeholder="Add any details that may help with your request" value={form.notes} onChange={handleChange} /></div></div>{msg.text && <div className={`message ${msg.type}`} role={msg.type === 'error' ? 'alert' : 'status'}>{msg.text}</div>}<div className="form-actions"><button className="secondary-button" type="button" onClick={() => navigate('/dashboard')}>Cancel</button><button className="primary-button" type="submit" disabled={loading}>{loading ? 'Submitting...' : <>Submit request <Icon name="arrow" size={16} /></>}</button></div></form></section>
-        <aside className="panel guide-panel"><h2>How it works</h2><p>Prepare your information before submitting.</p><div className="guide-list"><div className="guide-item"><span className="guide-number">1</span><div><strong>Choose a service</strong><p>Select the service and department that should handle your request.</p></div></div><div className="guide-item"><span className="guide-number">2</span><div><strong>Add supporting details</strong><p>Include documents and notes that help explain your application.</p></div></div><div className="guide-item"><span className="guide-number">3</span><div><strong>Track progress</strong><p>Use Track applications to follow the request after submission.</p></div></div></div><div className="notice">Only submit information required for your government service. Your request will be handled by the authorized department.</div></aside>
-      </div>
-    </div></main></div>
+    <div className="request-page">
+      <Sidebar />
+
+      <main className="request-main">
+        <header className="request-header">
+          <div>
+            <p className="eyebrow">MYGOV LESOTHO</p>
+            <h1>New Request</h1>
+            <p>
+              Apply for a government service and track your application
+              using its reference number.
+            </p>
+          </div>
+
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() => navigate('/dashboard')}
+          >
+            Back to dashboard
+          </button>
+        </header>
+
+        {msg.text && (
+          <div
+            className={`message ${msg.type}`}
+            role={msg.type === 'error' ? 'alert' : 'status'}
+          >
+            <span>{msg.text}</span>
+
+            {referenceNumber && (
+              <div className="reference-result">
+                <strong>Application reference</strong>
+                <div className="reference-number">
+                  {referenceNumber}
+                </div>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() =>
+                    navigator.clipboard?.writeText(referenceNumber)
+                  }
+                >
+                  Copy reference
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="request-layout">
+          <section className="request-card">
+            <div className="card-heading">
+              <div className="heading-icon">📄</div>
+              <div>
+                <h2>Application details</h2>
+                <p>Complete the form below.</p>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmit}>
+              <div className="form-group">
+                <label htmlFor="department">Government department *</label>
+                <select
+                  id="department"
+                  name="department"
+                  value={form.department}
+                  onChange={handleChange}
+                  required
+                >
+                  <option value="">Select a department</option>
+                  {DEPARTMENTS.map((department) => (
+                    <option
+                      key={department.value}
+                      value={department.value}
+                    >
+                      {department.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="service_type">Service required *</label>
+                <select
+                  id="service_type"
+                  name="service_type"
+                  value={form.service_type}
+                  onChange={handleChange}
+                  disabled={!form.department}
+                  required
+                >
+                  <option value="">
+                    {form.department
+                      ? 'Select a service'
+                      : 'Select a department first'}
+                  </option>
+
+                  {availableServices.map((service) => (
+                    <option key={service.value} value={service.value}>
+                      {service.value}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="notes">
+                  Application information
+                </label>
+                <textarea
+                  id="notes"
+                  name="notes"
+                  value={form.notes}
+                  onChange={handleChange}
+                  rows={5}
+                  maxLength={3000}
+                  placeholder="Enter any additional information that may help the officer review your request."
+                />
+                <small>{form.notes.length}/3000 characters</small>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="documents">
+                  Supporting documents
+                </label>
+
+                <div className="upload-box">
+                  <div className="upload-icon">⬆</div>
+                  <p>Upload supporting files</p>
+                  <small>PDF, JPG or PNG · Maximum 10 MB per file</small>
+                  <small>Up to 5 files per request</small>
+
+                  <input
+                    id="documents"
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                    multiple
+                    onChange={handleFiles}
+                    disabled={files.length >= MAX_FILES || loading}
+                  />
+                </div>
+
+                {files.length > 0 && (
+                  <div className="file-list">
+                    {files.map((file, index) => (
+                      <div
+                        className="file-item"
+                        key={`${file.name}-${file.lastModified}-${index}`}
+                      >
+                        <div className="file-details">
+                          <span className="file-icon">📎</span>
+                          <div>
+                            <strong>{file.name}</strong>
+                            <small>
+                              {(file.size / (1024 * 1024)).toFixed(2)} MB
+                            </small>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="remove-file"
+                          onClick={() => removeFile(index)}
+                          disabled={loading}
+                          aria-label={`Remove ${file.name}`}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="form-actions">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => navigate('/dashboard')}
+                  disabled={loading}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  className="primary-button"
+                  type="submit"
+                  disabled={loading}
+                >
+                  {loading ? 'Submitting...' : 'Submit request →'}
+                </button>
+              </div>
+            </form>
+          </section>
+
+          <aside className="request-card guide-card">
+            <div className="card-heading">
+              <div className="heading-icon">ℹ️</div>
+              <div>
+                <h2>Before you submit</h2>
+                <p>Helpful reminders</p>
+              </div>
+            </div>
+
+            <ul className="guide-list">
+              <li>
+                <span>✓</span>
+                Select the correct government department and service.
+              </li>
+              <li>
+                <span>✓</span>
+                Make sure your supporting documents are readable.
+              </li>
+              <li>
+                <span>✓</span>
+                Provide accurate information in the application notes.
+              </li>
+              <li>
+                <span>✓</span>
+                Keep your reference number to track your request.
+              </li>
+            </ul>
+
+            <div className="privacy-note">
+              <strong>🔒 Protect your information</strong>
+              <p>
+                Submit only documents needed for your application.
+                Do not share your password or login credentials.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              className="track-button"
+              onClick={() => navigate('/track')}
+            >
+              Track an existing request →
+            </button>
+          </aside>
+        </div>
+
+        <footer className="request-footer">
+          <p>
+            MyGov Lesotho · Integrated Government Services
+          </p>
+          <p>For demonstration and service-request management.</p>
+        </footer>
+      </main>
+
+      <style>{`
+        * {
+          box-sizing: border-box;
+        }
+
+        .request-page {
+          min-height: 100vh;
+          background: #f3f6fa;
+          color: #1e293b;
+          font-family: Arial, Helvetica, sans-serif;
+        }
+
+        .request-main {
+          margin-left: 260px;
+          padding: 32px;
+          min-height: 100vh;
+        }
+
+        .request-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 20px;
+          margin-bottom: 28px;
+        }
+
+        .eyebrow {
+          color: #13804a;
+          font-weight: 800;
+          letter-spacing: 1.5px;
+          font-size: 12px;
+          margin: 0 0 8px;
+        }
+
+        .request-header h1 {
+          font-size: clamp(26px, 3vw, 36px);
+          margin: 0 0 10px;
+          color: #102b46;
+        }
+
+        .request-header p:not(.eyebrow) {
+          color: #64748b;
+          line-height: 1.6;
+          margin: 0;
+        }
+
+        .request-layout {
+          display: grid;
+          grid-template-columns: minmax(0, 1.6fr) minmax(250px, 0.8fr);
+          align-items: start;
+          gap: 24px;
+        }
+
+        .request-card {
+          background: #fff;
+          border: 1px solid #e2e8f0;
+          border-radius: 16px;
+          padding: 26px;
+          box-shadow: 0 8px 25px rgba(15, 23, 42, 0.04);
+          min-width: 0;
+        }
+
+        .card-heading {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          margin-bottom: 26px;
+        }
+
+        .heading-icon {
+          width: 46px;
+          height: 46px;
+          display: grid;
+          place-items: center;
+          background: #e8f7ee;
+          border-radius: 12px;
+          font-size: 21px;
+        }
+
+        .card-heading h2 {
+          color: #102b46;
+          font-size: 19px;
+          margin: 0 0 6px;
+        }
+
+        .card-heading p {
+          color: #64748b;
+          margin: 0;
+          font-size: 13px;
+        }
+
+        .form-group {
+          margin-bottom: 22px;
+        }
+
+        .form-group label {
+          display: block;
+          font-weight: 700;
+          font-size: 14px;
+          margin-bottom: 9px;
+          color: #334155;
+        }
+
+        .form-group select,
+        .form-group textarea {
+          width: 100%;
+          padding: 13px 14px;
+          border: 1px solid #cbd5e1;
+          border-radius: 9px;
+          background: #fff;
+          color: #1e293b;
+          font-size: 14px;
+          font-family: inherit;
+          outline: none;
+          transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .form-group select:focus,
+        .form-group textarea:focus {
+          border-color: #13804a;
+          box-shadow: 0 0 0 3px rgba(19, 128, 74, 0.1);
+        }
+
+        .form-group select:disabled {
+          background: #f1f5f9;
+          cursor: not-allowed;
+        }
+
+        .form-group textarea {
+          resize: vertical;
+          line-height: 1.6;
+        }
+
+        .form-group > small {
+          display: block;
+          text-align: right;
+          color: #64748b;
+          font-size: 12px;
+          margin-top: 6px;
+        }
+
+        .upload-box {
+          border: 2px dashed #cbd5e1;
+          background: #f8fafc;
+          border-radius: 12px;
+          padding: 24px 18px;
+          text-align: center;
+        }
+
+        .upload-icon {
+          font-size: 30px;
+          color: #13804a;
+          margin-bottom: 10px;
+        }
+
+        .upload-box p {
+          font-weight: 700;
+          margin: 0 0 8px;
+        }
+
+        .upload-box small {
+          display: block;
+          color: #64748b;
+          margin: 5px 0;
+          font-size: 12px;
+        }
+
+        .upload-box input {
+          display: block;
+          width: 100%;
+          max-width: 340px;
+          margin: 18px auto 0;
+          font-size: 13px;
+        }
+
+        .file-list {
+          margin-top: 14px;
+          display: grid;
+          gap: 10px;
+        }
+
+        .file-item {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          padding: 12px;
+          border: 1px solid #e2e8f0;
+          border-radius: 9px;
+        }
+
+        .file-details {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
+
+        .file-icon {
+          font-size: 20px;
+        }
+
+        .file-details strong {
+          display: block;
+          font-size: 13px;
+          overflow-wrap: anywhere;
+        }
+
+        .file-details small {
+          display: block;
+          margin-top: 4px;
+          color: #64748b;
+          font-size: 12px;
+        }
+
+        .remove-file {
+          color: #b91c1c;
+          background: transparent;
+          border: none;
+          cursor: pointer;
+          font-weight: 700;
+          font-size: 12px;
+        }
+
+        .form-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 12px;
+          padding-top: 10px;
+        }
+
+        .primary-button,
+        .secondary-button,
+        .track-button {
+          min-height: 43px;
+          padding: 11px 17px;
+          border-radius: 9px;
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: background 0.2s, transform 0.2s;
+        }
+
+        .primary-button {
+          border: 1px solid #13804a;
+          background: #13804a;
+          color: #fff;
+        }
+
+        .primary-button:hover:not(:disabled) {
+          background: #0c673a;
+        }
+
+        .secondary-button {
+          border: 1px solid #cbd5e1;
+          color: #334155;
+          background: #fff;
+        }
+
+        .secondary-button:hover:not(:disabled) {
+          background: #f1f5f9;
+        }
+
+        .track-button {
+          width: 100%;
+          margin-top: 22px;
+          color: #126b40;
+          background: #e8f7ee;
+          border: 1px solid #c8ebd5;
+        }
+
+        button:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        .message {
+          padding: 15px 17px;
+          border-radius: 10px;
+          margin-bottom: 22px;
+          font-size: 14px;
+          line-height: 1.5;
+        }
+
+        .message.error {
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          color: #991b1b;
+        }
+
+        .message.success {
+          background: #f0fdf4;
+          border: 1px solid #bbf7d0;
+          color: #166534;
+        }
+
+        .reference-result {
+          margin-top: 12px;
+          padding-top: 12px;
+          border-top: 1px solid currentColor;
+        }
+
+        .reference-number {
+          font-size: 20px;
+          font-weight: 800;
+          letter-spacing: 1px;
+          margin: 8px 0 12px;
+          overflow-wrap: anywhere;
+        }
+
+        .guide-card {
+          position: sticky;
+          top: 20px;
+        }
+
+        .guide-list {
+          padding: 0;
+          margin: 0;
+          list-style: none;
+          display: grid;
+          gap: 18px;
+        }
+
+        .guide-list li {
+          display: flex;
+          gap: 10px;
+          align-items: flex-start;
+          font-size: 13px;
+          line-height: 1.6;
+          color: #475569;
+        }
+
+        .guide-list li span {
+          flex: 0 0 22px;
+          height: 22px;
+          display: grid;
+          place-items: center;
+          background: #dcfce7;
+          color: #15803d;
+          border-radius: 50%;
+          font-weight: 800;
+        }
+
+        .privacy-note {
+          margin-top: 26px;
+          padding: 16px;
+          border-radius: 10px;
+          background: #f0f9ff;
+          border: 1px solid #bae6fd;
+        }
+
+        .privacy-note strong {
+          color: #075985;
+          font-size: 13px;
+        }
+
+        .privacy-note p {
+          color: #475569;
+          font-size: 12px;
+          line-height: 1.7;
+          margin: 9px 0 0;
+        }
+
+        .request-footer {
+          text-align: center;
+          color: #94a3b8;
+          font-size: 12px;
+          padding: 28px 0 8px;
+        }
+
+        .request-footer p {
+          margin: 5px 0;
+        }
+
+        @media (max-width: 1100px) {
+          .request-main {
+            margin-left: 220px;
+            padding: 24px;
+          }
+
+          .request-layout {
+            grid-template-columns: minmax(0, 1fr);
+          }
+
+          .guide-card {
+            position: static;
+          }
+        }
+
+        @media (max-width: 700px) {
+          .request-main {
+            margin-left: 0;
+            padding: 18px;
+          }
+
+          .request-header {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+
+          .request-card {
+            padding: 19px;
+          }
+
+          .form-actions {
+            flex-direction: column-reverse;
+          }
+
+          .form-actions button {
+            width: 100%;
+          }
+
+          .file-item {
+            align-items: flex-start;
+          }
+        }
+      `}</style>
+    </div>
   );
-};
-
-const layoutStyles = { layout: { display: 'flex', minHeight: '100vh', background: '#f7f9fc' } };
-
-export default NewRequest;
+}

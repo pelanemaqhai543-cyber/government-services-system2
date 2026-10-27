@@ -1,351 +1,697 @@
-import React, { useEffect, useState } from 'react';
+﻿
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import OfficerLayout from '../../components/OfficerLayout';
 import API from '../../utils/api';
+import AISummaryPanel from '../../components/AISummaryPanel';
 
-const STATUS_OPTIONS = ['submitted', 'review', 'ready', 'completed', 'rejected'];
+const STATUS_OPTIONS = [
+  'pending',
+  'submitted',
+  'review',
+  'ready',
+  'approved',
+  'rejected',
+  'completed'
+];
 
-const STATUS_COLORS = {
-  submitted: { bg: '#ede9fe', color: '#6d28d9' },
-  review:    { bg: '#fef3c7', color: '#b45309' },
-  ready:     { bg: '#e0f2fe', color: '#0369a1' },
-  completed: { bg: '#dcfce7', color: '#15803d' },
-  rejected:  { bg: '#fee2e2', color: '#b91c1c' },
+const statusClass = (status = '') =>
+  `status-${String(status).toLowerCase().replace(/\s+/g, '-')}`;
+
+const formatDate = (date) => {
+  if (!date) return 'Not available';
+
+  const parsed = new Date(date);
+  return Number.isNaN(parsed.getTime())
+    ? 'Not available'
+    : parsed.toLocaleString();
 };
 
-const Icon = ({ name, size = 18 }) => {
-  const c = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' };
-  const p = {
-    search: <><circle cx="10.8" cy="10.8" r="6.5" /><path d="m16 16 4.5 4.5" /></>,
-    doc: <><path d="M6 3.5h8l4 4V20.5H6z" /><path d="M14 3.5v4h4M9 12h6M9 16h6" /></>,
-    download: <><path d="M12 3v13M7 11l5 5 5-5M5 21h14" /></>,
-    close: <><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></>,
-  };
-  return <svg {...c}>{p[name]}</svg>;
-};
+const getDocumentName = (document) =>
+  document?.file_name ||
+  document?.original_name ||
+  document?.name ||
+  'Uploaded document';
 
-const styles = `
-  .officer-apps { --blue:#00209F; --blue-dark:#00166f; --blue-soft:#edf2ff; --green:#009543; --green-dark:#007936; --green-soft:#eaf8f0; --red:#bd4545; --red-soft:#fff1f1; --black:#000; --ink:#172235; --muted:#718096; --border:#e5e9f0; --white:#fff; width:100%; color:var(--ink); }
-  .officer-apps * { box-sizing:border-box; }
-  .officer-apps h1, .officer-apps h2, .officer-apps h3, .officer-apps p { margin:0; }
-  .officer-apps button { font:inherit; cursor:pointer; }
-  .officer-apps .hero { display:flex; align-items:flex-end; justify-content:space-between; gap:22px; margin-bottom:24px; flex-wrap:wrap; }
-  .officer-apps .eyebrow { display:flex; align-items:center; gap:9px; margin-bottom:9px; color:var(--blue); font-size:11px; font-weight:800; letter-spacing:.13em; text-transform:uppercase; }
-  .officer-apps .eyebrow span { width:8px; height:8px; border-radius:50%; background:var(--green); box-shadow:0 0 0 5px var(--green-soft); }
-  .officer-apps h1 { color:var(--black); font-size:clamp(25px,3vw,32px); letter-spacing:-.04em; }
-  .officer-apps .hero p { margin-top:9px; color:var(--muted); font-size:14px; }
-  .officer-apps .refresh { display:inline-flex; align-items:center; gap:8px; padding:10px 16px; color:var(--blue); border:1px solid #cbd6f2; background:#fff; border-radius:10px; font-size:12.5px; font-weight:800; }
-  .officer-apps .metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
-  .officer-apps .metric { padding:16px 18px; background:#fff; border:1px solid var(--border); border-radius:14px; }
-  .officer-apps .metric span { font-size:11px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
-  .officer-apps .metric strong { display:block; margin-top:5px; font-size:24px; color:var(--black); }
-  .officer-apps .filters { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:18px; }
-  .officer-apps .search { flex:1; min-width:220px; padding:11px 14px; border:1px solid var(--border); border-radius:10px; font-size:13px; background:#fff; outline:none; }
-  .officer-apps .search:focus { border-color:var(--blue); box-shadow:0 0 0 3px var(--blue-soft); }
-  .officer-apps .chips { display:flex; gap:6px; flex-wrap:wrap; }
-  .officer-apps .chip { padding:7px 14px; border:1px solid var(--border); background:#fff; border-radius:99px; font-size:11.5px; font-weight:800; color:var(--muted); text-transform:capitalize; }
-  .officer-apps .chip.active { background:var(--blue); color:#fff; border-color:var(--blue); }
-  .officer-apps .table-wrap { background:#fff; border:1px solid var(--border); border-radius:14px; overflow:hidden; }
-  .officer-apps .table-head { display:grid; grid-template-columns:1.5fr 1fr 1.2fr 0.8fr 1fr 1.2fr; gap:12px; padding:14px 20px; background:#f7f9fc; border-bottom:1px solid var(--border); font-size:11px; font-weight:800; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
-  .officer-apps .row { display:grid; grid-template-columns:1.5fr 1fr 1.2fr 0.8fr 1fr 1.2fr; gap:12px; padding:16px 20px; border-bottom:1px solid #f0f2f5; align-items:center; font-size:13px; }
-  .officer-apps .row:hover { background:#fafbfe; }
-  .officer-apps .ref { font-weight:800; color:var(--blue); }
-  .officer-apps .badge { display:inline-block; padding:4px 10px; border-radius:99px; font-size:11px; font-weight:800; text-transform:capitalize; }
-  .officer-apps .view-btn { padding:7px 12px; background:var(--blue); color:#fff; border:none; border-radius:8px; font-size:11.5px; font-weight:800; }
-  .officer-apps .view-btn:hover { background:var(--blue-dark); }
-  .officer-apps .empty { padding:60px 20px; text-align:center; color:var(--muted); font-size:13px; }
+const getDocumentUrl = (document) => {
+  const value = document?.file_url || document?.file_path;
 
-  /* MODAL */
-  .officer-apps .overlay { position:fixed; inset:0; background:rgba(10,20,40,.55); display:flex; align-items:center; justify-content:center; padding:20px; z-index:1000; }
-  .officer-apps .modal { background:#fff; border-radius:18px; width:min(720px,100%); max-height:90vh; overflow-y:auto; box-shadow:0 30px 80px rgba(0,0,0,.25); }
-  .officer-apps .modal-head { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; padding:24px 26px 18px; border-bottom:1px solid var(--border); }
-  .officer-apps .modal-head h2 { font-size:19px; }
-  .officer-apps .modal-head p { margin-top:6px; color:var(--muted); font-size:12.5px; }
-  .officer-apps .close { background:transparent; border:none; color:var(--muted); padding:6px; }
-  .officer-apps .modal-body { padding:22px 26px; }
-  .officer-apps .detail-section { margin-bottom:20px; }
-  .officer-apps .detail-section h3 { font-size:12px; font-weight:800; color:var(--blue); text-transform:uppercase; letter-spacing:.1em; margin-bottom:12px; padding-bottom:8px; border-bottom:1px solid var(--border); }
-  .officer-apps .field-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:14px; }
-  .officer-apps .field label { display:block; font-size:11px; font-weight:800; color:var(--muted); margin-bottom:4px; text-transform:capitalize; }
-  .officer-apps .field div { font-size:13.5px; color:var(--ink); }
-  .officer-apps .doc-list { display:grid; gap:8px; }
-  .officer-apps .doc { display:flex; align-items:center; justify-content:space-between; padding:10px 14px; background:#f7f9fc; border:1px solid var(--border); border-radius:10px; font-size:12.5px; }
-  .officer-apps .doc strong { font-weight:700; }
-  .officer-apps .doc a { color:var(--blue); text-decoration:none; font-size:11.5px; font-weight:800; }
-  .officer-apps .status-selector { display:flex; gap:8px; flex-wrap:wrap; }
-  .officer-apps .status-btn { padding:9px 14px; border:1px solid var(--border); background:#fff; border-radius:9px; font-size:12px; font-weight:800; text-transform:capitalize; }
-  .officer-apps .status-btn.active { background:var(--blue); color:#fff; border-color:var(--blue); }
-  .officer-apps .rejection-input { width:100%; padding:11px 14px; border:1px solid var(--border); border-radius:10px; font-size:13px; font-family:inherit; min-height:70px; margin-top:10px; }
-  .officer-apps .modal-foot { display:flex; gap:10px; justify-content:flex-end; padding:18px 26px 22px; border-top:1px solid var(--border); }
-  .officer-apps .btn { padding:11px 20px; border-radius:10px; font-size:13px; font-weight:800; border:1px solid transparent; }
-  .officer-apps .btn-secondary { background:#fff; color:var(--blue); border-color:#cbd6f2; }
-  .officer-apps .btn-primary { background:var(--blue); color:#fff; border-color:var(--blue); }
-  .officer-apps .btn-primary:disabled { opacity:.5; cursor:not-allowed; }
+  if (!value || typeof value !== 'string') return '';
 
-  @media (max-width:900px) {
-    .officer-apps .metrics { grid-template-columns:repeat(2,1fr); }
-    .officer-apps .table-head, .officer-apps .row { grid-template-columns:1fr 1fr; }
-    .officer-apps .table-head span:nth-child(n+3), .officer-apps .row > *:nth-child(n+3) { display:none; }
-    .officer-apps .field-grid { grid-template-columns:1fr; }
+  if (/^https?:\/\//i.test(value)) return value;
+  if (value.startsWith('/')) return value;
+  if (value.startsWith('uploads/')) return `/${value}`;
+
+  // Never expose server filesystem paths such as C:\...
+  if (/^[a-zA-Z]:[\\/]/.test(value) || value.startsWith('\\\\')) {
+    return '';
   }
-`;
 
-const OfficerApplications = () => {
-  const [apps, setApps] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  return `/${value.replace(/^\.?\//, '')}`;
+};
+
+const isPreviewableDocument = (document) => {
+  const name = getDocumentName(document).toLowerCase();
+  const mime = String(
+    document?.mime_type || document?.file_type || ''
+  ).toLowerCase();
+
+  return (
+    mime === 'application/pdf' ||
+    mime.startsWith('image/') ||
+    /\.(pdf|png|jpe?g|gif|webp)$/i.test(name)
+  );
+};
+
+const styles = {
+  page: {
+    padding: '24px',
+    color: '#172033',
+    fontFamily: 'Arial, sans-serif'
+  },
+  heading: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: '16px',
+    flexWrap: 'wrap',
+    marginBottom: '20px'
+  },
+  muted: {
+    color: '#64748b',
+    fontSize: '14px'
+  },
+  controls: {
+    display: 'flex',
+    gap: '12px',
+    flexWrap: 'wrap',
+    marginBottom: '20px'
+  },
+  input: {
+    padding: '11px 12px',
+    border: '1px solid #cbd5e1',
+    borderRadius: '8px',
+    minWidth: '220px',
+    fontSize: '14px',
+    background: '#fff'
+  },
+  button: {
+    padding: '10px 14px',
+    border: '0',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontWeight: 600
+  },
+  primary: {
+    background: '#126b4f',
+    color: '#fff'
+  },
+  secondary: {
+    background: '#e2e8f0',
+    color: '#172033'
+  },
+  danger: {
+    background: '#b91c1c',
+    color: '#fff'
+  },
+  metrics: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+    gap: '14px',
+    marginBottom: '22px'
+  },
+  metric: {
+    padding: '17px',
+    background: '#fff',
+    border: '1px solid #e2e8f0',
+    borderRadius: '12px'
+  },
+  tableWrap: {
+    width: '100%',
+    overflowX: 'auto',
+    background: '#fff',
+    border: '1px solid #e2e8f0',
+    borderRadius: '12px'
+  },
+  table: {
+    width: '100%',
+    borderCollapse: 'collapse',
+    minWidth: '780px'
+  },
+  th: {
+    padding: '14px',
+    background: '#f1f5f9',
+    textAlign: 'left',
+    fontSize: '13px',
+    whiteSpace: 'nowrap'
+  },
+  td: {
+    padding: '14px',
+    borderTop: '1px solid #e2e8f0',
+    fontSize: '14px',
+    verticalAlign: 'top'
+  },
+  badge: {
+    display: 'inline-block',
+    padding: '5px 9px',
+    borderRadius: '20px',
+    background: '#e2e8f0',
+    fontSize: '12px',
+    fontWeight: 700,
+    textTransform: 'capitalize'
+  },
+  modalBackdrop: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 1000,
+    background: 'rgba(15, 23, 42, 0.65)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '16px'
+  },
+  modal: {
+    width: 'min(850px, 100%)',
+    maxHeight: '90vh',
+    overflowY: 'auto',
+    background: '#fff',
+    borderRadius: '14px',
+    padding: '24px',
+    boxShadow: '0 20px 60px rgba(0,0,0,.25)'
+  },
+  section: {
+    padding: '16px 0',
+    borderBottom: '1px solid #e2e8f0'
+  },
+  document: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: '12px',
+    padding: '12px',
+    border: '1px solid #e2e8f0',
+    borderRadius: '9px',
+    marginTop: '10px'
+  }
+};
+
+export default function OfficerApplications() {
+  const [applications, setApplications] = useState([]);
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [selected, setSelected] = useState(null);
   const [newStatus, setNewStatus] = useState('');
   const [rejectionReason, setRejectionReason] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [opening, setOpening] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
 
-  const loadQueue = async () => {
+  const loadApplications = useCallback(async () => {
+    setLoading(true);
+    setError('');
+
     try {
-      setLoading(true);
-      setError('');
-      const res = await API.get('/applications/officer/queue');
-      setApps(res.data || []);
+      const response = await API.get('/requests/queue');
+      const data = response.data;
+
+      setApplications(Array.isArray(data) ? data : data?.applications || []);
     } catch (err) {
-      setError(err.response?.data?.message || 'Unable to load applications.');
+      console.error('Loading officer queue failed:', err);
+      setError(
+        err.response?.data?.message ||
+        'Could not load applications. Check your login and backend.'
+      );
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  useEffect(() => { loadQueue(); }, []);
+  useEffect(() => {
+    loadApplications();
+  }, [loadApplications]);
 
-  const openApp = async (id) => {
+  const filteredApplications = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return applications.filter((application) => {
+      const matchesStatus =
+        statusFilter === 'all' ||
+        String(application.status || '').toLowerCase() === statusFilter;
+
+      const searchableText = [
+        application.reference_number,
+        application.full_name,
+        application.national_id,
+        application.email,
+        application.service_type,
+        application.department
+      ].filter(Boolean).join(' ').toLowerCase();
+
+      return matchesStatus && searchableText.includes(query);
+    });
+  }, [applications, search, statusFilter]);
+
+  const metrics = useMemo(() => {
+    const count = (status) =>
+      applications.filter(
+        (application) =>
+          String(application.status || '').toLowerCase() === status
+      ).length;
+
+    return {
+      total: applications.length,
+      pending: count('pending'),
+      review: count('review'),
+      approved: count('approved'),
+      rejected: count('rejected')
+    };
+  }, [applications]);
+
+  const openApplication = async (application) => {
+    setSelected(application);
+    setNewStatus(String(application.status || 'pending').toLowerCase());
+    setRejectionReason('');
+    setNotice('');
+    setError('');
+    setOpening(true);
+
     try {
-      const res = await API.get(`/applications/officer/${id}`);
-      setSelected(res.data);
-      setNewStatus(res.data.status);
-      setRejectionReason(res.data.rejection_reason || '');
+      const response = await API.get(`/requests/${application.id}`);
+      const detail = response.data;
+
+      setSelected({
+        ...application,
+        ...detail,
+        documents: Array.isArray(detail.documents)
+          ? detail.documents
+          : application.documents || []
+      });
+      setNewStatus(String(detail.status || application.status || 'pending').toLowerCase());
     } catch (err) {
-      alert('Unable to load application details.');
+      // Queue data can still be reviewed if detail retrieval fails.
+      console.warn('Detail request failed:', err);
+      setSelected(application);
+    } finally {
+      setOpening(false);
     }
   };
 
-  const saveStatus = async () => {
-    if (!newStatus) return;
-    if (newStatus === 'rejected' && rejectionReason.trim().length < 5) {
-      alert('Please provide a rejection reason (at least 5 characters).');
+  const closeApplication = () => {
+    if (saving) return;
+    setSelected(null);
+    setError('');
+    setNotice('');
+  };
+
+  const saveStatus = async (event) => {
+    event.preventDefault();
+
+    if (!selected) return;
+
+    if (
+      newStatus === 'rejected' &&
+      !rejectionReason.trim()
+    ) {
+      setError('Enter a rejection reason before rejecting this application.');
       return;
     }
+
     setSaving(true);
+    setError('');
+    setNotice('');
+
     try {
-      await API.put(`/applications/officer/${selected.id}/status`, {
+      await API.put(`/requests/${selected.id}/status`, {
         status: newStatus,
-        rejection_reason: newStatus === 'rejected' ? rejectionReason : null,
+        rejection_reason: rejectionReason.trim()
       });
-      setSelected(null);
-      loadQueue();
+
+      setNotice('Application status updated successfully.');
+
+      setApplications((current) =>
+        current.map((application) =>
+          application.id === selected.id
+            ? { ...application, status: newStatus }
+            : application
+        )
+      );
+
+      setSelected((current) =>
+        current ? { ...current, status: newStatus } : current
+      );
+
+      await loadApplications();
     } catch (err) {
-      alert(err.response?.data?.message || 'Unable to update status.');
+      console.error('Updating application failed:', err);
+      setError(
+        err.response?.data?.message ||
+        'Could not update application status.'
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  const filtered = apps.filter((a) => {
-    if (statusFilter !== 'all' && a.status !== statusFilter) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      const match =
-        String(a.reference_number || '').toLowerCase().includes(q) ||
-        String(a.citizen_name || '').toLowerCase().includes(q) ||
-        String(a.citizen_id || '').toLowerCase().includes(q) ||
-        String(a.citizen_username || '').toLowerCase().includes(q) ||
-        String(a.service_type || '').toLowerCase().includes(q);
-      if (!match) return false;
-    }
-    return true;
-  });
-
-  const metrics = {
-    total: apps.length,
-    submitted: apps.filter((a) => a.status === 'submitted').length,
-    review: apps.filter((a) => a.status === 'review').length,
-    completed: apps.filter((a) => a.status === 'completed').length,
-  };
-
   return (
-    <OfficerLayout
-      title="Citizen Applications"
-      subtitle="Review and process applications submitted through the portal."
-    >
-      <style>{styles}</style>
-      <div className="officer-apps">
-
-        <header className="hero">
+    <OfficerLayout>
+      <main style={styles.page}>
+        <header style={styles.heading}>
           <div>
-            <div className="eyebrow"><span /> Department queue</div>
-            <h1>Applications</h1>
-            <p>Every application submitted by citizens assigned to your department.</p>
+            <h1 style={{ margin: '0 0 7px' }}>Officer Applications</h1>
+            <p style={styles.muted}>
+              Review applications, inspect supporting documents, and record decisions.
+            </p>
           </div>
-          <button className="refresh" onClick={loadQueue}>↻ Refresh queue</button>
+
+          <button
+            type="button"
+            style={{ ...styles.button, ...styles.primary }}
+            onClick={loadApplications}
+            disabled={loading}
+          >
+            {loading ? 'Refreshing...' : 'Refresh queue'}
+          </button>
         </header>
 
-        <section className="metrics">
-          <div className="metric"><span>Total</span><strong>{metrics.total}</strong></div>
-          <div className="metric"><span>Submitted</span><strong>{metrics.submitted}</strong></div>
-          <div className="metric"><span>In review</span><strong>{metrics.review}</strong></div>
-          <div className="metric"><span>Completed</span><strong>{metrics.completed}</strong></div>
-        </section>
-
-        <div className="filters">
-          <input
-            className="search"
-            placeholder="Search by reference, citizen, service…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div className="chips">
-            {['all', 'submitted', 'review', 'ready', 'completed', 'rejected'].map((s) => (
-              <button
-                key={s}
-                className={`chip ${statusFilter === s ? 'active' : ''}`}
-                onClick={() => setStatusFilter(s)}
-              >
-                {s === 'all' ? 'All' : s}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {error && <div style={{ padding: 14, background: '#fbeff0', color: '#a23c3c', borderRadius: 10, marginBottom: 14 }}>⚠ {error}</div>}
-
-        <div className="table-wrap">
-          <div className="table-head">
-            <span>Reference</span>
-            <span>Citizen</span>
-            <span>Service</span>
-            <span>Docs</span>
-            <span>Status</span>
-            <span>Action</span>
-          </div>
-
-          {loading ? (
-            <div className="empty">Loading applications…</div>
-          ) : filtered.length === 0 ? (
-            <div className="empty">No applications found.</div>
-          ) : (
-            filtered.map((a) => (
-              <div className="row" key={a.id}>
-                <span className="ref">{a.reference_number}</span>
-                <span>{a.citizen_name || a.citizen_id || a.citizen_username || '—'}</span>
-                <span>{a.service_type}</span>
-                <span>{a.document_count || 0}</span>
-                <span>
-                  <span className="badge" style={STATUS_COLORS[a.status] || {}}>{a.status}</span>
-                </span>
-                <span><button className="view-btn" onClick={() => openApp(a.id)}>Review →</button></span>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* DETAIL MODAL */}
-        {selected && (
-          <div className="overlay" onClick={() => setSelected(null)}>
-            <div className="modal" onClick={(e) => e.stopPropagation()}>
-              <div className="modal-head">
-                <div>
-                  <h2>{selected.service_type}</h2>
-                  <p>Ref: <strong>{selected.reference_number}</strong></p>
-                </div>
-                <button className="close" onClick={() => setSelected(null)}><Icon name="close" size={20} /></button>
-              </div>
-
-              <div className="modal-body">
-                {/* Citizen info */}
-                <div className="detail-section">
-                  <h3>Applicant information</h3>
-                  <div className="field-grid">
-                    <div className="field"><label>Name</label><div>{selected.citizen_name || '—'}</div></div>
-                    <div className="field"><label>National ID</label><div>{selected.citizen_id || '—'}</div></div>
-                    <div className="field"><label>Username</label><div>{selected.citizen_username || '—'}</div></div>
-                    <div className="field"><label>Email</label><div>{selected.citizen_email || '—'}</div></div>
-                    <div className="field"><label>Phone</label><div>{selected.citizen_phone || '—'}</div></div>
-                    <div className="field"><label>Submitted</label><div>{new Date(selected.created_at).toLocaleString()}</div></div>
-                  </div>
-                </div>
-
-                {/* Form data */}
-                {selected.form_data && Object.keys(selected.form_data).length > 0 && (
-                  <div className="detail-section">
-                    <h3>Application details</h3>
-                    <div className="field-grid">
-                      {Object.entries(selected.form_data).map(([k, v]) => (
-                        <div className="field" key={k}>
-                          <label>{k.replace(/_/g, ' ')}</label>
-                          <div>{String(v || '—')}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Documents */}
-                {selected.documents && selected.documents.length > 0 && (
-                  <div className="detail-section">
-                    <h3>Uploaded documents ({selected.documents.length})</h3>
-                    <div className="doc-list">
-                      {selected.documents.map((d) => (
-                        <div className="doc" key={d.id}>
-                          <span><Icon name="doc" size={14} /> <strong>{d.file_name}</strong> ({d.file_size ? Math.round(d.file_size / 1024) : 0} KB)</span>
-                          <a href={d.file_data} download={d.file_name}>Download ↓</a>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Notes */}
-                {selected.notes && (
-                  <div className="detail-section">
-                    <h3>Notes from citizen</h3>
-                    <div style={{ fontSize: 13, color: '#172235', lineHeight: 1.6 }}>{selected.notes}</div>
-                  </div>
-                )}
-
-                {/* Status update */}
-                <div className="detail-section">
-                  <h3>Update status</h3>
-                  <div className="status-selector">
-                    {STATUS_OPTIONS.map((s) => (
-                      <button
-                        key={s}
-                        className={`status-btn ${newStatus === s ? 'active' : ''}`}
-                        onClick={() => setNewStatus(s)}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                  {newStatus === 'rejected' && (
-                    <textarea
-                      className="rejection-input"
-                      placeholder="Reason for rejection…"
-                      value={rejectionReason}
-                      onChange={(e) => setRejectionReason(e.target.value)}
-                    />
-                  )}
-                </div>
-              </div>
-
-              <div className="modal-foot">
-                <button className="btn btn-secondary" onClick={() => setSelected(null)}>Cancel</button>
-                <button className="btn btn-primary" onClick={saveStatus} disabled={saving || newStatus === selected.status}>
-                  {saving ? 'Saving…' : 'Save status'}
-                </button>
-              </div>
-            </div>
+        {error && (
+          <div role="alert" style={{
+            padding: '12px',
+            borderRadius: '8px',
+            background: '#fee2e2',
+            color: '#991b1b',
+            marginBottom: '16px'
+          }}>
+            {error}
           </div>
         )}
-      </div>
+
+        <section style={styles.metrics}>
+          {[
+            ['Total applications', metrics.total],
+            ['Pending', metrics.pending],
+            ['Under review', metrics.review],
+            ['Approved', metrics.approved],
+            ['Rejected', metrics.rejected]
+          ].map(([label, value]) => (
+            <div key={label} style={styles.metric}>
+              <div style={styles.muted}>{label}</div>
+              <div style={{ fontSize: '27px', fontWeight: 700, marginTop: '7px' }}>
+                {value}
+              </div>
+            </div>
+          ))}
+        </section>
+
+        <section style={styles.controls}>
+          <input
+            aria-label="Search applications"
+            style={styles.input}
+            placeholder="Search reference, name, ID..."
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+
+          <select
+            aria-label="Filter by status"
+            style={styles.input}
+            value={statusFilter}
+            onChange={(event) => setStatusFilter(event.target.value)}
+          >
+            <option value="all">All statuses</option>
+            {STATUS_OPTIONS.map((status) => (
+              <option value={status} key={status}>
+                {status.charAt(0).toUpperCase() + status.slice(1)}
+              </option>
+            ))}
+          </select>
+        </section>
+
+        <div style={styles.tableWrap}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>Reference</th>
+                <th style={styles.th}>Applicant</th>
+                <th style={styles.th}>Service</th>
+                <th style={styles.th}>Submitted</th>
+                <th style={styles.th}>Documents</th>
+                <th style={styles.th}>Status</th>
+                <th style={styles.th}>Action</th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td style={styles.td} colSpan="7">Loading applications...</td>
+                </tr>
+              ) : filteredApplications.length === 0 ? (
+                <tr>
+                  <td style={styles.td} colSpan="7">
+                    No applications match your search.
+                  </td>
+                </tr>
+              ) : (
+                filteredApplications.map((application) => (
+                  <tr key={application.id}>
+                    <td style={styles.td}>
+                      <strong>{application.reference_number || `#${application.id}`}</strong>
+                    </td>
+                    <td style={styles.td}>
+                      <strong>{application.full_name || 'Unknown applicant'}</strong>
+                      <div style={styles.muted}>
+                        {application.national_id || 'No ID recorded'}
+                      </div>
+                    </td>
+                    <td style={styles.td}>
+                      {application.service_type || 'Not specified'}
+                      <div style={styles.muted}>
+                        {application.department || ''}
+                      </div>
+                    </td>
+                    <td style={styles.td}>{formatDate(application.created_at)}</td>
+                    <td style={styles.td}>
+                      {Number(application.document_count ?? application.documents?.length ?? 0)}
+                    </td>
+                    <td style={styles.td}>
+                      <span style={styles.badge} className={statusClass(application.status)}>
+                        {application.status || 'pending'}
+                      </span>
+                    </td>
+                    <td style={styles.td}>
+                      <button
+                        type="button"
+                        style={{ ...styles.button, ...styles.primary }}
+                        onClick={() => openApplication(application)}
+                      >
+                        Review
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {selected && (
+          <div
+            style={styles.modalBackdrop}
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) closeApplication();
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="application-review-title"
+              style={styles.modal}
+            >
+              <header style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: '14px',
+                alignItems: 'flex-start'
+              }}>
+                <div>
+                  <h2 id="application-review-title" style={{ marginTop: 0 }}>
+                    Review application
+                  </h2>
+                  <div style={styles.muted}>
+                    Reference: {selected.reference_number || `#${selected.id}`}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  style={{ ...styles.button, ...styles.secondary }}
+                  onClick={closeApplication}
+                  disabled={saving}
+                >
+                  Close
+                </button>
+              </header>
+
+              {opening && <p style={styles.muted}>Loading application details...</p>}
+
+              {notice && (
+                <p role="status" style={{ color: '#166534' }}>{notice}</p>
+              )}
+
+              {error && (
+                <p role="alert" style={{ color: '#b91c1c' }}>{error}</p>
+              )}
+
+              <section style={styles.section}>
+                <h3>Applicant details</h3>
+                <p><strong>Name:</strong> {selected.full_name || 'Not available'}</p>
+                <p><strong>National ID:</strong> {selected.national_id || 'Not available'}</p>
+                <p><strong>Email:</strong> {selected.email || 'Not available'}</p>
+                <p><strong>Date of birth:</strong> {selected.date_of_birth || 'Not available'}</p>
+                <p><strong>Service:</strong> {selected.service_type || 'Not specified'}</p>
+                <p><strong>Department:</strong> {selected.department || 'Not specified'}</p>
+                <p><strong>Submitted:</strong> {formatDate(selected.created_at)}</p>
+                <p><strong>Current status:</strong> {selected.status || 'pending'}</p>
+                <p>
+                  <strong>Application notes:</strong><br />
+                  {selected.notes || 'No notes provided.'}
+                </p>
+              </section>
+
+              <section style={styles.section}>
+                <h3>Supporting documents</h3>
+
+                {Array.isArray(selected.documents) && selected.documents.length > 0 ? (
+                  selected.documents.map((document, index) => {
+                    const url = getDocumentUrl(document);
+                    const name = getDocumentName(document);
+
+                    return (
+                      <div
+                        key={document.id || `${name}-${index}`}
+                        style={styles.document}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <strong style={{ overflowWrap: 'anywhere' }}>{name}</strong>
+                          <div style={styles.muted}>
+                            Uploaded: {formatDate(document.uploaded_at)}
+                          </div>
+                        </div>
+
+                        {url ? (
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            {isPreviewableDocument(document) && (
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noreferrer"
+                                style={{
+                                  ...styles.button,
+                                  ...styles.secondary,
+                                  textDecoration: 'none'
+                                }}
+                              >
+                                View
+                              </a>
+                            )}
+
+                            <a
+                              href={url}
+                              download={name}
+                              style={{
+                                ...styles.button,
+                                ...styles.primary,
+                                textDecoration: 'none'
+                              }}
+                            >
+                              Download
+                            </a>
+                          </div>
+                        ) : (
+                          <span style={{ ...styles.muted, color: '#b91c1c' }}>
+                            File link unavailable
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p style={styles.muted}>
+                    No documents are linked to this application.
+                  </p>
+                )}
+              </section>
+
+              {selected.ai_summary && (
+                <section style={styles.section}>
+                  <h3>AI review summary</h3>
+                  <AISummaryPanel application={selected} />
+                </section>
+              )}
+
+              <form onSubmit={saveStatus} style={styles.section}>
+                <h3>Officer decision</h3>
+
+                <label htmlFor="application-status">
+                  Application status
+                </label>
+
+                <select
+                  id="application-status"
+                  style={{ ...styles.input, display: 'block', marginTop: '8px' }}
+                  value={newStatus}
+                  onChange={(event) => setNewStatus(event.target.value)}
+                  disabled={saving || opening}
+                >
+                  {STATUS_OPTIONS.map((status) => (
+                    <option value={status} key={status}>
+                      {status.charAt(0).toUpperCase() + status.slice(1)}
+                    </option>
+                  ))}
+                </select>
+
+                {newStatus === 'rejected' && (
+                  <div style={{ marginTop: '15px' }}>
+                    <label htmlFor="rejection-reason">
+                      Rejection reason (required)
+                    </label>
+                    <textarea
+                      id="rejection-reason"
+                      rows="4"
+                      value={rejectionReason}
+                      onChange={(event) => setRejectionReason(event.target.value)}
+                      placeholder="Explain why the application is being rejected..."
+                      required
+                      style={{
+                        ...styles.input,
+                        display: 'block',
+                        boxSizing: 'border-box',
+                        width: '100%',
+                        marginTop: '8px'
+                      }}
+                    />
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={saving || opening}
+                  style={{
+                    ...styles.button,
+                    ...styles.primary,
+                    marginTop: '16px',
+                    opacity: saving || opening ? 0.6 : 1
+                  }}
+                >
+                  {saving ? 'Saving...' : 'Save decision'}
+                </button>
+              </form>
+            </section>
+          </div>
+        )}
+      </main>
     </OfficerLayout>
   );
-};
-
-export default OfficerApplications;
+}
