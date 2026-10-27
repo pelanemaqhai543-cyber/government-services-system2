@@ -1,4 +1,3 @@
-
 const db = require('../config/db');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -93,8 +92,6 @@ function makeDocumentNumber() {
 }
 
 function publicBaseUrl(req) {
-  // Configure PUBLIC_BASE_URL in production.
-  // Do not trust forwarded host headers without proxy configuration.
   return String(
     process.env.PUBLIC_BASE_URL ||
     `${req.protocol}://${req.get('host')}`
@@ -218,6 +215,22 @@ exports.createRequest = async (req, res) => {
         message: 'Your account is not active. Contact the relevant office.'
       });
     }
+
+    // --- PREVENT DUPLICATE APPLICATIONS ---
+    const [existing] = await db.execute(
+      `SELECT id, reference_number FROM service_requests
+       WHERE user_id = ? AND service_type = ?
+       AND status NOT IN ('completed', 'rejected', 'cancelled')
+       LIMIT 1`,
+      [userId, serviceType]
+    );
+
+    if (existing.length > 0) {
+      return res.status(409).json({
+        message: `You already have an active application for ${serviceType} (Ref: ${existing[0].reference_number}). Please wait for it to be processed.`
+      });
+    }
+    // ---------------------------------------
 
     connection = await db.getConnection();
 
@@ -509,7 +522,6 @@ exports.updateRequestStatus = async (req, res) => {
       });
     }
 
-    // Do not change an application after a demo document is issued.
     const [issued] = await db.execute(
       `SELECT id FROM demo_issued_documents
        WHERE request_id = ? LIMIT 1`,
@@ -611,7 +623,6 @@ exports.issueDemoDocument = async (req, res) => {
       ? 'DEMO BIRTH CERTIFICATE'
       : 'DEMO NATIONAL ID';
 
-    // The unique request_id constraint also prevents a second issuance.
     const [existing] = await db.execute(
       `SELECT id, document_number, status, issued_at
        FROM demo_issued_documents
@@ -650,7 +661,6 @@ exports.issueDemoDocument = async (req, res) => {
       'base64'
     );
 
-    // Build PDF before inserting the database record.
     await new Promise((resolve, reject) => {
       const pdf = new PDFDocument({
         size: 'A4',
@@ -782,7 +792,6 @@ exports.issueDemoDocument = async (req, res) => {
 
       insertedId = result.insertId;
     } catch (error) {
-      // If another request won the race, don't leave an orphan PDF.
       try {
         fs.unlinkSync(pdfPath);
       } catch (_) {}
@@ -882,9 +891,6 @@ exports.verifyDemoDocument = async (req, res) => {
 /**
  * GET /api/requests/:id/demo-document
  * Download a demo PDF.
- *
- * Citizens can download their own document; officers must have
- * department access to the application.
  */
 exports.downloadDemoDocument = async (req, res) => {
   try {

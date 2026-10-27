@@ -1,32 +1,16 @@
-﻿
-const SUMMARY_SCHEMA = {
+﻿const SUMMARY_SCHEMA = {
   name: 'application_review',
   strict: true,
   schema: {
     type: 'object',
     additionalProperties: false,
     properties: {
-      recommendation: {
-        type: 'string',
-        enum: ['approve', 'request_info', 'escalate', 'reject'],
-      },
-      risk_score: {
-        type: 'integer',
-        minimum: 0,
-        maximum: 100,
-      },
-      summary: { type: 'string' },
-      findings: {
-        type: 'array',
-        items: { type: 'string' },
-      },
+      recommendation: { type: 'string', enum: ['approve', 'request_info', 'escalate', 'reject'] },
+      risk_score: { type: 'integer', minimum: 0, maximum: 100 },
+      summary: { type: 'string', description: "Exactly 1 short sentence. Max 15 words." },
+      findings: { type: 'array', items: { type: 'string' } },
     },
-    required: [
-      'recommendation',
-      'risk_score',
-      'summary',
-      'findings',
-    ],
+    required: ['recommendation', 'risk_score', 'summary', 'findings'],
   },
 };
 
@@ -38,100 +22,52 @@ const INTAKE_SCHEMA = {
     additionalProperties: false,
     properties: {
       is_complete: { type: 'boolean' },
-      missing_documents: {
-        type: 'array',
-        items: { type: 'string' },
-      },
-      detected_issues: {
-        type: 'array',
-        items: { type: 'string' },
-      },
+      missing_documents: { type: 'array', items: { type: 'string' } },
+      detected_issues: { type: 'array', items: { type: 'string' } },
     },
-    required: [
-      'is_complete',
-      'missing_documents',
-      'detected_issues',
-    ],
+    required: ['is_complete', 'missing_documents', 'detected_issues'],
   },
 };
 
 function buildSummaryPrompt(application, citizen, ruleResult) {
-  const documents = Array.isArray(application.documents)
-    ? application.documents
-    : [];
-
   const system = `
-You assist authorized government officers reviewing applications in Lesotho.
-
-Rules:
-1. The authorized officer makes the final decision.
-2. Use only the supplied application information and evidence.
-3. Never invent documents, facts, stamps, signatures, or verification results.
-4. A document filename does not prove that its contents are valid.
-5. If only filenames are provided, explicitly state that the document contents have not been inspected.
-6. Flag potentially missing information as a finding, not as a proven violation.
-7. For new Birth Certificate or National ID applications, do not penalize a citizen merely for lacking an existing national ID.
-8. Recommend request_info when necessary evidence is missing or insufficient.
-9. Recommend escalate when the evidence is ambiguous or requires specialist review.
-10. Give a concise, factual summary and a risk score from 0 to 100.
-11. Do not claim an application is officially approved or rejected.
+You are a government AI assistant in Lesotho. Review the application.
+STRICT RULES:
+1. The summary must be EXACTLY 1 sentence (max 15 words). Do not write paragraphs.
+2. Look at the "rule_engine_result". If it says "eligible: false", use its exact "reason" in your summary.
+3. If "uploaded_documents" is empty, say "Missing: [document name]."
+4. If "uploaded_documents" has a file (e.g., "birth.pdf"), assume it is valid.
+5. Base your answer ONLY on the provided data.
 `;
+
+  const documentNames = (application.documents || []).map(d => d.file_name || d.name || 'Uploaded Document').join(', ');
 
   const user = JSON.stringify({
     application: {
-      id: application.id ?? null,
-      reference: application.reference_number ?? null,
-      service_type: application.service_type ?? null,
-      department: application.department ?? null,
-      status: application.status ?? null,
-      form_data: application.form_data ?? {},
-      notes: application.notes ?? '',
-      document_count: documents.length,
-      uploaded_documents: documents.map((doc) => ({
-        file_name: doc.file_name || doc.name || 'Unnamed document',
-        file_type: doc.file_type || null,
-        content_inspected: doc.content_inspected === true,
-      })),
+      reference: application.reference_number,
+      service_type: application.service_type,
+      department: application.department,
+      notes: application.notes || '',
+      uploaded_documents: documentNames || 'None uploaded',
     },
     citizen: {
-      full_name: citizen.full_name ?? null,
-      national_id: citizen.national_id
-        ? `***${String(citizen.national_id).slice(-3)}`
-        : null,
-      date_of_birth: citizen.date_of_birth ?? null,
+      full_name: citizen.full_name,
+      national_id: citizen.national_id ? `***${String(citizen.national_id).slice(-3)}` : 'No ID (New Applicant)',
     },
-    rule_engine_result: ruleResult ?? null,
+    rule_engine_result: ruleResult || null,
   });
 
   return { system, user };
 }
 
 function buildIntakePrompt(application, documents) {
-  const system = `
-Check whether a government application appears complete based only on the supplied requirements and evidence.
-
-Do not invent required documents.
-A filename alone does not establish document validity.
-Do not claim that a stamp or signature is present unless document contents were actually inspected.
-Return only the required structured response.
-`;
-
+  const system = `Check if complete based on documents. Return JSON only.`;
   const user = JSON.stringify({
-    service_type: application.service_type ?? null,
-    required_documents: application.required_documents ?? [],
-    provided_documents: (documents || []).map((doc) => ({
-      type: doc.document_type ?? null,
-      name: doc.file_name ?? null,
-      content_inspected: doc.content_inspected === true,
-    })),
+    service_type: application.service_type,
+    required_documents: application.required_documents || [],
+    provided_documents: (documents || []).map(d => d.file_name),
   });
-
   return { system, user };
 }
 
-module.exports = {
-  SUMMARY_SCHEMA,
-  INTAKE_SCHEMA,
-  buildSummaryPrompt,
-  buildIntakePrompt,
-};
+module.exports = { SUMMARY_SCHEMA, INTAKE_SCHEMA, buildSummaryPrompt, buildIntakePrompt };

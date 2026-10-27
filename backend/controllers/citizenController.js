@@ -10,7 +10,7 @@ exports.getProfile = async (req, res) => {
               u.full_name, u.email, u.phone, u.role,
               u.status, u.picture_data,
               (u.picture_data IS NOT NULL AND u.picture_data <> '') AS picture_locked,
-              u.date_of_birth, u.gender,
+              u.date_of_birth, u.gender, u.birth_certificate_number,
               cp.verification_status
        FROM users u
        LEFT JOIN citizen_profiles cp ON cp.user_id = u.id
@@ -95,7 +95,6 @@ exports.verifyCitizen = async (req, res) => {
 
 /* ============================================================
    List all citizens — Home Affairs view-only
-   Includes picture_data so directory can show real avatars
 ============================================================ */
 exports.getAllCitizens = async (req, res) => {
   try {
@@ -103,7 +102,7 @@ exports.getAllCitizens = async (req, res) => {
       `SELECT u.id, u.national_id, u.username, u.account_type,
               u.full_name, u.email, u.phone,
               u.status, u.created_at, u.picture_data,
-              u.date_of_birth, u.gender,
+              u.date_of_birth, u.gender, u.birth_certificate_number,
               cp.verification_status
        FROM users u
        LEFT JOIN citizen_profiles cp ON cp.user_id = u.id
