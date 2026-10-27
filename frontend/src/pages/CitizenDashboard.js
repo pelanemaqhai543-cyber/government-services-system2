@@ -16,6 +16,7 @@ const Icon = ({ name, size = 19 }) => {
     user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
     download: <><path d="M12 3v13M7 11l5 5 5-5M5 21h14" /></>,
     bell: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>,
+    trash: <><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></>,
   };
   return <svg {...common}>{paths[name]}</svg>;
 };
@@ -29,7 +30,6 @@ const styles = `
   .citizen-page .eyebrow span { width:8px; height:8px; border-radius:50%; background:#20c778; }
   .citizen-page h1 { color:#fff; font-size:clamp(28px,3.2vw,42px); letter-spacing:-.055em; }
   .citizen-page .hero p { margin-top:9px; color:rgba(255,255,255,.78); font-size:14px; }
-  .citizen-page .btn-primary { display:inline-flex; align-items:center; gap:8px; padding:12px 20px; background:#baf4d2; color:#063d22; border:1px solid #7ce4ad; border-radius:10px; font-size:13px; font-weight:800; cursor:pointer; }
   .citizen-page .profile-card { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:25px; padding:18px 21px; border:1px solid var(--border); border-radius:15px; background:#fff; box-shadow:0 10px 25px rgba(20,35,60,.07); }
   .citizen-page .profile-left { display:flex; align-items:center; gap:13px; }
   .citizen-page .avatar { display:grid; place-items:center; width:52px; height:52px; color:#fff; border-radius:50%; background:#00209f; font-size:18px; font-weight:900; overflow:hidden; }
@@ -42,11 +42,16 @@ const styles = `
   .citizen-page .id-card .id-number { font-size:22px; font-weight:900; letter-spacing:2px; margin-bottom:4px; }
   .citizen-page .id-card .id-bc { font-size:12px; opacity:0.8; }
   .citizen-page .id-card button { display:flex; align-items:center; gap:8px; padding:12px 18px; background:#fff; color:#00209F; border:none; border-radius:8px; font-weight:800; font-size:13px; cursor:pointer; }
+  
   .citizen-page .notifications-panel { padding:18px 20px; background:#fff; border:1px solid var(--border); border-radius:15px; box-shadow:0 10px 26px rgba(20,35,60,.06); margin-bottom:25px; }
   .citizen-page .notifications-panel h2 { font-size:16px; margin-bottom:14px; color:#000; display:flex; align-items:center; gap:8px; }
-  .citizen-page .notification-item { padding:12px 14px; border-left:4px solid #00209F; background:#f7f9fc; border-radius:8px; margin-bottom:10px; font-size:13px; color:#172235; line-height:1.5; }
+  
+  .citizen-page .notification-item { position:relative; padding:12px 40px 12px 14px; border-left:4px solid #00209F; background:#f7f9fc; border-radius:8px; margin-bottom:10px; font-size:13px; color:#172235; line-height:1.5; }
   .citizen-page .notification-item:last-child { margin-bottom:0; }
   .citizen-page .notification-meta { font-size:10px; color:#718096; margin-top:6px; }
+  .citizen-page .delete-notif { position:absolute; top:10px; right:10px; background:transparent; border:none; color:#b91c1c; opacity:0.4; cursor:pointer; padding:4px; border-radius:50%; transition:0.2s; display:flex; align-items:center; justify-content:center; }
+  .citizen-page .delete-notif:hover { opacity:1; background:#fee2e2; }
+
   .citizen-page .section-heading { display:flex; align-items:flex-end; justify-content:space-between; gap:14px; margin:25px 0 13px; }
   .citizen-page .section-heading h2 { color:#000; font-size:18px; }
   .citizen-page .section-heading p { margin-top:5px; color:var(--muted); font-size:12px; }
@@ -87,14 +92,26 @@ const CitizenDashboard = () => {
     API.get('/applications/notifications').then((response) => setNotifications(Array.isArray(response.data) ? response.data : [])).catch(() => {});
   }, []);
 
+  const handleDeleteNotification = (id) => {
+    // Optimistically remove from UI
+    setNotifications((prev) => prev.filter((n) => n.id !== id));
+    // Send request to backend
+    API.delete(`/applications/notifications/${id}`).catch((err) => {
+      console.error('Failed to delete notification:', err);
+    });
+  };
+
   const visible = useMemo(() => applications.slice(0, 5), [applications]);
   const completed = applications.filter((a) => ['completed', 'approved'].includes(a.status)).length;
   const active = applications.filter((a) => ['submitted', 'pending', 'review', 'ready'].includes(a.status)).length;
   const displayName = profile?.full_name || user?.full_name || 'Citizen';
   const initial = displayName.charAt(0).toUpperCase();
   const picture = profile?.picture_data || user?.picture_data;
+  
   const nationalId = profile?.national_id || user?.national_id;
   const birthCertNumber = profile?.birth_certificate_number || user?.birth_certificate_number;
+  const otherDocNumber = profile?.other_document_number;
+  const otherDocType = profile?.other_document_type;
   const userId = profile?.id || user?.id;
 
   const handleDownloadCertificate = () => {
@@ -138,12 +155,17 @@ const CitizenDashboard = () => {
             <div className="profile-status"><i /> Active</div>
           </section>
 
-          {(nationalId || birthCertNumber) && (
+          {(nationalId || birthCertNumber || otherDocNumber) && (
             <section className="id-card">
               <div>
                 <h3>Official Government Documents</h3>
                 {nationalId && <div className="id-number">ID: {nationalId}</div>}
                 {birthCertNumber && <div className="id-bc">Birth Certificate: {birthCertNumber}</div>}
+                {otherDocNumber && (
+                  <div className="id-bc" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                    {otherDocType || 'Document'}: {otherDocNumber}
+                  </div>
+                )}
               </div>
               {birthCertNumber && (
                 <button onClick={handleDownloadCertificate}>
@@ -153,12 +175,18 @@ const CitizenDashboard = () => {
             </section>
           )}
 
-          {/* NOTIFICATIONS PANEL */}
           {notifications.length > 0 && (
             <section className="notifications-panel">
               <h2><Icon name="bell" size={18} /> Recent Notifications</h2>
               {notifications.slice(0, 4).map((n) => (
                 <div key={n.id} className="notification-item">
+                  <button 
+                    className="delete-notif" 
+                    onClick={() => handleDeleteNotification(n.id)}
+                    aria-label="Dismiss notification"
+                  >
+                    <Icon name="trash" size={14} />
+                  </button>
                   {n.message}
                   <div className="notification-meta">
                     {new Date(n.created_at).toLocaleString()}

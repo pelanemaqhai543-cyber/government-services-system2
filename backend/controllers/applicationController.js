@@ -103,20 +103,39 @@ exports.createApplication = async (req, res) => {
         [newStatus, aiResult.summary, aiResult.recommendation, aiResult.risk_score, applicationId]
       );
 
-      if (newStatus === 'approved' && service_type === 'National ID Registration') {
-        if (!user.national_id || String(user.national_id).length !== 13) {
-          if (user.date_of_birth) {
-            const d = new Date(user.date_of_birth);
-            const yy = String(d.getFullYear()).slice(-2);
-            const mm = String(d.getMonth() + 1).padStart(2, '0');
-            const dd = String(d.getDate()).padStart(2, '0');
-            const genderDigit = String(user.gender).toLowerCase() === 'male' ? '5' : '6';
-            const seq = String(Math.floor(Math.random() * 900000) + 100000).padStart(6, '0');
-            const newID = `${yy}${mm}${dd}${seq}${genderDigit}`;
+      // GENERATE DOCUMENTS FOR ALL DEPARTMENTS
+      if (newStatus === 'approved') {
+        if (service_type === 'National ID Registration') {
+          if (!user.national_id || String(user.national_id).length !== 13) {
+            if (user.date_of_birth) {
+              const d = new Date(user.date_of_birth);
+              const yy = String(d.getFullYear()).slice(-2);
+              const mm = String(d.getMonth() + 1).padStart(2, '0');
+              const dd = String(d.getDate()).padStart(2, '0');
+              const genderDigit = String(user.gender).toLowerCase() === 'male' ? '5' : '6';
+              const seq = String(Math.floor(Math.random() * 900000) + 100000).padStart(6, '0');
+              const newID = `${yy}${mm}${dd}${seq}${genderDigit}`;
 
-            await db.query(`UPDATE users SET national_id = ? WHERE id = ?`, [newID, userId]);
-            notificationMsg += ` Your National ID is ${newID}.`;
+              await db.query(`UPDATE users SET national_id = ? WHERE id = ?`, [newID, userId]);
+              notificationMsg += ` Your National ID is ${newID}.`;
+            }
           }
+        } else if (service_type === 'Birth Certificate') {
+          const bcNumber = `BC-${new Date().getFullYear()}-${Math.floor(Math.random() * 900000) + 100000}`;
+          await db.query(`UPDATE users SET birth_certificate_number = ? WHERE id = ?`, [bcNumber, userId]);
+          notificationMsg += ` Your Birth Certificate Number is ${bcNumber}.`;
+        } else {
+          const prefixMap = {
+            'Passport Application': 'PP', 'Passport Renewal': 'PPR',
+            "Driver's Licence": 'DL', 'Vehicle Registration': 'VR',
+            'Tax Filing': 'TX', 'Pension Application': 'PN',
+            'Police Clearance': 'PC'
+          };
+          const docPrefix = prefixMap[service_type] || 'DOC';
+          const docNumber = `${docPrefix}-${new Date().getFullYear()}-${Math.floor(Math.random() * 900000) + 100000}`;
+
+          await db.query(`UPDATE users SET other_document_number = ?, other_document_type = ? WHERE id = ?`, [docNumber, service_type, userId]);
+          notificationMsg += ` Your ${service_type} document number is ${docNumber}.`;
         }
       }
 
@@ -165,7 +184,6 @@ exports.updateApplicationDocuments = async (req, res) => {
       [applicationId]
     );
 
-    // Immediately process AI here
     const [userRows] = await db.query(`SELECT full_name, national_id, date_of_birth, gender FROM users WHERE id = ?`, [userId]);
     const user = userRows[0];
 
@@ -188,20 +206,38 @@ exports.updateApplicationDocuments = async (req, res) => {
         [newStatus, aiResult.summary, aiResult.recommendation, aiResult.risk_score, applicationId]
       );
 
-      if (newStatus === 'approved' && app.service_type === 'National ID Registration') {
-        if (!user.national_id || String(user.national_id).length !== 13) {
-          if (user.date_of_birth) {
-            const d = new Date(user.date_of_birth);
-            const yy = String(d.getFullYear()).slice(-2);
-            const mm = String(d.getMonth() + 1).padStart(2, '0');
-            const dd = String(d.getDate()).padStart(2, '0');
-            const genderDigit = String(user.gender).toLowerCase() === 'male' ? '5' : '6';
-            const seq = String(Math.floor(Math.random() * 900000) + 100000).padStart(6, '0');
-            const newID = `${yy}${mm}${dd}${seq}${genderDigit}`;
+      if (newStatus === 'approved') {
+        if (app.service_type === 'National ID Registration') {
+          if (!user.national_id || String(user.national_id).length !== 13) {
+            if (user.date_of_birth) {
+              const d = new Date(user.date_of_birth);
+              const yy = String(d.getFullYear()).slice(-2);
+              const mm = String(d.getMonth() + 1).padStart(2, '0');
+              const dd = String(d.getDate()).padStart(2, '0');
+              const genderDigit = String(user.gender).toLowerCase() === 'male' ? '5' : '6';
+              const seq = String(Math.floor(Math.random() * 900000) + 100000).padStart(6, '0');
+              const newID = `${yy}${mm}${dd}${seq}${genderDigit}`;
 
-            await db.query(`UPDATE users SET national_id = ? WHERE id = ?`, [newID, userId]);
-            notificationMsg += ` Your National ID is ${newID}.`;
+              await db.query(`UPDATE users SET national_id = ? WHERE id = ?`, [newID, userId]);
+              notificationMsg += ` Your National ID is ${newID}.`;
+            }
           }
+        } else if (app.service_type === 'Birth Certificate') {
+          const bcNumber = `BC-${new Date().getFullYear()}-${Math.floor(Math.random() * 900000) + 100000}`;
+          await db.query(`UPDATE users SET birth_certificate_number = ? WHERE id = ?`, [bcNumber, userId]);
+          notificationMsg += ` Your Birth Certificate Number is ${bcNumber}.`;
+        } else {
+          const prefixMap = {
+            'Passport Application': 'PP', 'Passport Renewal': 'PPR',
+            "Driver's Licence": 'DL', 'Vehicle Registration': 'VR',
+            'Tax Filing': 'TX', 'Pension Application': 'PN',
+            'Police Clearance': 'PC'
+          };
+          const docPrefix = prefixMap[app.service_type] || 'DOC';
+          const docNumber = `${docPrefix}-${new Date().getFullYear()}-${Math.floor(Math.random() * 900000) + 100000}`;
+
+          await db.query(`UPDATE users SET other_document_number = ?, other_document_type = ? WHERE id = ?`, [docNumber, app.service_type, userId]);
+          notificationMsg += ` Your ${app.service_type} document number is ${docNumber}.`;
         }
       }
 
@@ -222,14 +258,29 @@ exports.updateApplicationDocuments = async (req, res) => {
 exports.getNotifications = async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT id, message, is_read, created_at 
-       FROM notifications 
-       WHERE user_id = ? 
-       ORDER BY created_at DESC LIMIT 10`,
+      `SELECT id, message, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 10`,
       [req.user.id]
     );
     return res.json(rows);
   } catch (err) { return res.status(500).json({ message: 'Error fetching notifications' }); }
+};
+
+// NEW FUNCTION: Delete a notification
+exports.deleteNotification = async (req, res) => {
+  try {
+    const notificationId = req.params.id;
+    const userId = req.user.id;
+
+    await db.query(
+      'DELETE FROM notifications WHERE id = ? AND user_id = ?',
+      [notificationId, userId]
+    );
+
+    return res.json({ success: true, message: 'Notification deleted' });
+  } catch (err) {
+    console.error('deleteNotification error:', err);
+    return res.status(500).json({ message: 'Error deleting notification' });
+  }
 };
 
 exports.getOfficerQueue = async (req, res) => {
@@ -259,8 +310,7 @@ exports.getMyApplications = async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT sr.*, (SELECT COUNT(*) FROM request_documents rd WHERE rd.request_id = sr.id) AS document_count
-       FROM service_requests sr
-       WHERE sr.user_id = ? ORDER BY sr.created_at DESC`,
+       FROM service_requests sr WHERE sr.user_id = ? ORDER BY sr.created_at DESC`,
       [req.user.id]
     );
     return res.json(rows);
