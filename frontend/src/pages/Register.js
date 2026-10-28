@@ -66,9 +66,34 @@ const Register = () => {
   const [showPass, setShowPass] = useState(false);
 
   const handleChange = (event) => {
+    const { name, value } = event.target;
+
+    // Phone: digits only (strip anything else as the user types).
+    if (name === 'phone') {
+      const digitsOnly = value.replace(/\D/g, '').slice(0, 8);
+      setForm(current => ({ ...current, phone: digitsOnly }));
+      setError('');
+      return;
+    }
+
+    // National ID: digits only, capped at 13.
+    if (name === 'national_id') {
+      const digitsOnly = value.replace(/\D/g, '').slice(0, 13);
+      setForm(current => ({ ...current, national_id: digitsOnly }));
+      setError('');
+      return;
+    }
+
+    // Email: force lowercase so uppercase can never be entered.
+    if (name === 'email') {
+      setForm(current => ({ ...current, email: value.toLowerCase() }));
+      setError('');
+      return;
+    }
+
     setForm(current => ({
       ...current,
-      [event.target.name]: event.target.value
+      [name]: value
     }));
     setError('');
   };
@@ -101,7 +126,26 @@ const Register = () => {
       return setError('Passwords do not match.');
     }
 
+    // Phone validation (if provided): must be digits only.
+    if (form.phone && !/^\d+$/.test(form.phone)) {
+      return setError('Phone number must contain digits only.');
+    }
+
+    // Email validation (if provided): no uppercase, must be a valid address.
+    if (form.email) {
+      if (/[A-Z]/.test(form.email)) {
+        return setError('Email must not contain uppercase letters.');
+      }
+      if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/.test(form.email)) {
+        return setError('Please enter a valid email address.');
+      }
+    }
+
     if (tab === 'adult') {
+      // National ID validation: digits only + exactly 13.
+      if (!/^\d+$/.test(form.national_id)) {
+        return setError('National ID must contain digits only.');
+      }
       if (!/^\d{13}$/.test(form.national_id)) {
         return setError('National ID must be exactly 13 digits.');
       }
@@ -252,6 +296,7 @@ const Register = () => {
                         onChange={handleChange}
                         placeholder="13 digits"
                         inputMode="numeric"
+                        autoComplete="off"
                         maxLength={13}
                         minLength={13}
                         pattern="[0-9]{13}"
@@ -322,6 +367,8 @@ const Register = () => {
                       onChange={handleChange}
                       placeholder="you@example.com"
                       autoComplete="email"
+                      autoCapitalize="none"
+                      spellCheck={false}
                     />
                   </span>
                 </label>
@@ -338,6 +385,10 @@ const Register = () => {
                       onChange={handleChange}
                       placeholder="e.g. 58000000"
                       autoComplete="tel"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={8}
+                      title="Digits only"
                     />
                   </span>
                 </label>

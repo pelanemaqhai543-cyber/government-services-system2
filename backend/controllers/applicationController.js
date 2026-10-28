@@ -103,7 +103,7 @@ exports.createApplication = async (req, res) => {
         [newStatus, aiResult.summary, aiResult.recommendation, aiResult.risk_score, applicationId]
       );
 
-      // GENERATE DOCUMENTS FOR ALL DEPARTMENTS
+      // GENERATE DOCUMENTS
       if (newStatus === 'approved') {
         if (service_type === 'National ID Registration') {
           if (!user.national_id || String(user.national_id).length !== 13) {
@@ -265,22 +265,11 @@ exports.getNotifications = async (req, res) => {
   } catch (err) { return res.status(500).json({ message: 'Error fetching notifications' }); }
 };
 
-// NEW FUNCTION: Delete a notification
 exports.deleteNotification = async (req, res) => {
   try {
-    const notificationId = req.params.id;
-    const userId = req.user.id;
-
-    await db.query(
-      'DELETE FROM notifications WHERE id = ? AND user_id = ?',
-      [notificationId, userId]
-    );
-
+    await db.query('DELETE FROM notifications WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
     return res.json({ success: true, message: 'Notification deleted' });
-  } catch (err) {
-    console.error('deleteNotification error:', err);
-    return res.status(500).json({ message: 'Error deleting notification' });
-  }
+  } catch (err) { return res.status(500).json({ message: 'Error deleting notification' }); }
 };
 
 exports.getOfficerQueue = async (req, res) => {

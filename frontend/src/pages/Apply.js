@@ -1,4 +1,3 @@
-
 import React, { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Sidebar from '../components/Sidebar';
@@ -90,7 +89,9 @@ const SERVICES = {
       { name: 'subject_date_of_birth', label: 'Date of birth', type: 'date', required: true },
       { name: 'subject_gender', label: 'Gender', type: 'select', options: ['Male', 'Female'], required: true },
       { name: 'subject_district', label: 'District of birth', type: 'text', required: true },
+      { name: 'mother_national_id', label: "Mother's National ID", type: 'text', required: true },
       { name: 'mother_name', label: "Mother's full name", type: 'text', required: true },
+      { name: 'father_national_id', label: "Father's National ID", type: 'text' },
       { name: 'father_name', label: "Father's full name", type: 'text' },
       { name: 'place_of_birth', label: 'Place of birth', type: 'text', required: true },
     ],
@@ -109,6 +110,8 @@ const SERVICES = {
       { name: 'subject_gender', label: 'Gender', type: 'select', options: ['Male', 'Female'], required: true },
       { name: 'subject_district', label: 'District', type: 'text', required: true },
       { name: 'subject_address', label: 'Residential address', type: 'textarea', required: true },
+      { name: 'mother_national_id', label: "Mother's National ID", type: 'text' },
+      { name: 'father_national_id', label: "Father's National ID", type: 'text' },
     ],
   },
 
@@ -187,6 +190,8 @@ const SERVICES = {
       { name: 'subject_national_id', label: 'National ID', type: 'text', required: true },
       { name: 'subject_date_of_birth', label: 'Date of birth', type: 'date', required: true },
       { name: 'place_of_birth', label: 'Place of birth', type: 'text', required: true },
+      { name: 'mother_national_id', label: "Mother's National ID", type: 'text' },
+      { name: 'father_national_id', label: "Father's National ID", type: 'text' },
     ],
   },
 
@@ -277,6 +282,7 @@ const SERVICES = {
       { name: 'subject_full_name', label: 'Full name', type: 'text', required: true },
       { name: 'subject_national_id', label: 'National ID', type: 'text', required: true },
       { name: 'licence_type', label: 'Licence type', type: 'select', options: ['Learner', 'Class B', 'Class C'], required: true },
+      { name: 'guardian_national_id', label: 'Parent/Guardian National ID', type: 'text' },
     ],
   },
 
@@ -634,6 +640,18 @@ const Apply = () => {
         subject_gender: user.gender || '',
         subject_address: user.address || '',
         subject_district: user.district || '',
+
+        // Parent ID fields — read from the user's database record.
+        // ADJUST: if your backend nests these under `parents`, use
+        // user.parents?.mother_national_id etc. instead.
+        mother_national_id:
+          user.mother_national_id || user.parents?.mother_national_id || '',
+        father_national_id:
+          user.father_national_id || user.parents?.father_national_id || '',
+        guardian_national_id:
+          user.guardian_national_id || user.parents?.guardian_national_id || '',
+        mother_name: user.mother_name || user.parents?.mother_name || '',
+        father_name: user.father_name || user.parents?.father_name || '',
       };
 
       definition.fields.forEach((field) => {
