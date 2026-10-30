@@ -1,4 +1,3 @@
-
 const mysql = require('mysql2');
 require('dotenv').config();
 
@@ -31,6 +30,10 @@ const poolConfig = {
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
+  
+  // 👇 THIS IS THE FIX: Forces the connection to stay open
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000 
 };
 
 if (isCloudDB) {
@@ -40,6 +43,7 @@ if (isCloudDB) {
 const pool = mysql.createPool(poolConfig);
 const promisePool = pool.promise();
 
+// Test connection on startup
 promisePool.getConnection()
   .then((connection) => {
     console.log('MySQL connected successfully');
