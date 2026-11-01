@@ -1,71 +1,144 @@
-﻿const { yearsBetween } = require('./utils');
+﻿
+const { yearsBetween } = require('./utils');
 const db = require('../config/db');
 
 async function evaluate(application, citizen) {
   const warnings = [];
+  const missingDocuments = [];
   const service = String(application.service_type || '').toLowerCase();
   const formData = application.form_data || {};
   const docs = application.documents || [];
-  const docNames = docs.map(d => (d.file_name || d.document_type || d.name || '').toLowerCase());
-  const isNewApplicant = service.includes('birth') || service.includes('new') || service.includes('registration');
 
-  if (citizen.status === 'deceased') {
-    return { eligible: false, reason: 'Citizen is marked as deceased.', rule_id: 'HA_DECEASED', warnings };
+  const docNames = docs.map((d) =>
+    String(
+      d.file_name ||
+      d.document_type ||
+      d.name ||
+      ''
+    ).toLowerCase()
+  );
+
+  const hasDocument = (...keywords) =>
+    docNames.some((name) =>
+      keywords.some((keyword) => name.includes(keyword))
+    );
+
+  const isNewId =
+    service.includes('id') &&
+    (service.includes('new') || service.includes('registration'));
+
+  // 1. Citizen status check
+  if (String(citizen.status || '').toLowerCase() === 'deceased') {
+    return {
+      eligible: false,
+      reason: 'Citizen is marked as deceased.',
+      rule_id: 'HA_DECEASED',
+      warnings,
+      missing_documents: missingDocuments
+    };
   }
 
-  // 1. Parents' IDs Required for New National ID
-  if (service.includes('id') && (service.includes('new') || service.includes('registration'))) {
+  // 2. Parents' National IDs for new National ID applications
+  if (isNewId) {
     const motherId = formData.mother_id;
     const fatherId = formData.father_id;
 
     if (!motherId || String(motherId).length !== 13) {
-      return { eligible: false, reason: "A valid 13-digit Mother's National ID is required.", rule_id: 'HA_NO_MOTHER_ID', warnings };
+      warnings.push(
+        "A valid 13-digit Mother's National ID is required."
+      );
     }
+
     if (!fatherId || String(fatherId).length !== 13) {
-      return { eligible: false, reason: "A valid 13-digit Father's National ID is required.", rule_id: 'HA_NO_FATHER_ID', warnings };
+      warnings.push(
+        "A valid 13-digit Father's National ID is required."
+      );
     }
 
-    try {
-      const [mother] = await db.query('SELECT id FROM users WHERE national_id = ?', [motherId]);
-      const [father] = await db.query('SELECT id FROM users WHERE national_id = ?', [fatherId]);
-      
-      if (mother.length === 0) return { eligible: false, reason: "Mother's National ID not found in the system.", rule_id: 'HA_MOTHER_NOT_FOUND', warnings };
-      if (father.length === 0) return { eligible: false, reason: "Father's National ID not found in the system.", rule_id: 'HA_FATHER_NOT_FOUND', warnings };
-    } catch (err) {
-      console.error('Parent verification failed:', err.message);
+    if (
+      motherId && String(motherId).length === 13 &&
+      fatherId && String(fatherId).length === 13
+    ) {
+      try {
+        const [mother] = await db.query(
+          'SELECT id FROM users WHERE national_id = ?',
+          [motherId]
+        );
+
+        const [father] = await db.query(
+          'SELECT id FROM users WHERE national_id = ?',
+          [fatherId]
+        );
+
+        if (!mother.length) {
+          warnings.push("Mother's National ID was not found in the system.");
+        }
+
+        if (!father.length) {
+          warnings.push("Father's National ID was not found in the system.");
+        }
+      } catch (error) {
+        console.error('Parent verification failed:', error.message);
+        warnings.push('Parent National ID verification could not be completed.');
+      }
     }
   }
 
-  // 2. Death Certificate Check
+  // 3. Death Certificate application
   if (service.includes('death')) {
-    const deceasedId = formData.deceased_national_id || formData.subject_national_id;
+    const deceasedId =
+      formData.deceased_national_id ||
+      formData.subject_national_id;
+
     if (!deceasedId || String(deceasedId).length !== 13) {
-      return { eligible: false, reason: "Death Certificate requires the deceased person's 13-digit National ID.", rule_id: 'HA_DEATH_NO_ID', warnings };
+      warnings.push(
+        "Death Certificate requires the deceased person's 13-digit National ID."
+      );
     }
   }
 
-  // 3. New ID Requires Birth Certificate
-  if (service.includes('id') && (service.includes('new') || service.includes('registration'))) {
-    const hasBirthCert = docNames.some(n => n.includes('birth') || n.includes('bc-'));
-    if (!hasBirthCert) {
-      return { eligible: false, reason: "New ID application requires a Birth Certificate.", rule_id: 'HA_NEW_ID_NO_BIRTHCERT', warnings };
+  // 4. New National ID requires Birth Certificate
+  if (isNewId) {
+    if (!hasDocument('birth', 'bc-')) {
+      missingDocuments.push({
+        document_name: 'Birth Certificate',
+        reason: 'A Birth Certificate is required for a new National ID application.',
+        action: 'Upload your Birth Certificate.'
+      });
     }
   }
 
-  // 4. Birth Certificate Requires Chief's Letter
+  // 5. Birth Certificate requires Chief's Letter
   if (service.includes('birth')) {
-    const hasChiefLetter = docNames.some(n => n.includes('chief') || n.includes('village'));
-    if (!hasChiefLetter && docs.length > 0) {
-      return { eligible: false, reason: "Birth Certificate requires a letter from your village chief.", rule_id: 'HA_BIRTH_NO_CHIEF_LETTER', warnings };
+    if (!hasDocument('chief', 'village')) {
+      missingDocuments.push({
+        document_name: "Village Chief's Letter",
+        reason: "A letter from the village chief is required for this Birth Certificate application.",
+        action: "Upload a letter from your village chief."
+      });
     }
   }
 
-  // 5. Age Check
-  if (/identity|id registration/i.test(application.service_type)) {
+  // 6. Age check
+  if (/identity|id registration/i.test(application.service_type || '')) {
     const age = yearsBetween(citizen.date_of_birth);
-    if (age !== null && age < 16) { warnings.push(`Applicant is ${age} years old.`); }
+
+    if (age !== null && age < 16) {
+      warnings.push(`Applicant is ${age} years old.`);
+    }
   }
 
-  return { eligible: true, reason: 'Prerequisites met.', rule_id: 'HA_OK', warnings };
+  const eligible = missingDocuments.length === 0;
+
+  return {
+    eligible,
+    reason: eligible
+      ? 'No missing documents were identified by the configured rules.'
+      : `${missingDocuments.length} required document(s) are missing.`,
+    rule_id: eligible ? 'HA_OK' : 'HA_MISSING_DOCUMENTS',
+    warnings,
+    missing_documents: missingDocuments
+  };
 }
+
 module.exports = { evaluate };

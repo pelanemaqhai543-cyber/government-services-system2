@@ -9,6 +9,10 @@ const {
 
 const aiController = require('../controllers/aiController');
 
+// ======================================================
+// AUTHORIZED STAFF ROLES
+// ======================================================
+
 const STAFF_ROLES = [
   'home_affairs',
   'admin',
@@ -21,14 +25,26 @@ const STAFF_ROLES = [
   'employee',
 ];
 
+// ======================================================
+// GET MASTER APPLICATION QUEUE
 // GET /api/ai/master-queue
-// Returns applications for authorized staff.
-// It does not approve, reject, or change application statuses.
+// ======================================================
+
+// Admin and Home Affairs can access all applications.
+// Other staff are restricted by department in aiController.
+//
+// This route only retrieves applications.
+// It does not directly approve, reject, or change statuses.
+
 router.get(
   '/master-queue',
   verifyToken,
   requireRole(...STAFF_ROLES),
   aiController.getMasterQueue
 );
+
+// ======================================================
+// EXPORT ROUTER
+// ======================================================
 
 module.exports = router;

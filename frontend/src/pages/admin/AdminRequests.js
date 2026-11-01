@@ -71,6 +71,22 @@ const styles = `
   .ai-profile-item span { display:block; color:var(--muted); font-size:10px; font-weight:800; letter-spacing:.05em; text-transform:uppercase; }
   .ai-profile-item strong { display:block; margin-top:5px; color:#172235; font-size:13px; word-break:break-word; }
   .ai-close-footer { width:100%; padding:12px; margin-top:21px; color:#fff; border:0; border-radius:10px; background:var(--blue); font-size:13px; font-weight:800; }
+  
+  /* Documents & Review Form Styles */
+  .doc-list { display:grid; gap:10px; margin-bottom:20px; }
+  .doc-item { display:flex; align-items:center; justify-content:space-between; padding:12px; border:1px solid var(--line); border-radius:10px; background:#fff; font-size:13px; }
+  .doc-link { color:var(--blue); font-weight:800; text-decoration:none; }
+  .doc-link:hover { text-decoration:underline; }
+  .review-form { margin-top: 20px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: #fbfcfe; }
+  .review-form h3 { margin-bottom: 15px; font-size: 14px; color: var(--blue); }
+  .review-label { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 800; color: #26364b; }
+  .review-input { width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #d5dce8; border-radius: 8px; font-size: 13px; }
+  textarea.review-input { min-height: 80px; resize: vertical; }
+  .review-submit { width: 100%; padding: 12px; background: var(--blue); color: #fff; border: none; border-radius: 8px; font-weight: 800; cursor: pointer; }
+  .review-submit:disabled { opacity: 0.6; cursor: not-allowed; }
+  .review-success { padding: 10px; margin-bottom: 15px; background: #dcfce7; color: #15803d; border-radius: 8px; font-size: 13px; }
+  .review-error { padding: 10px; margin-bottom: 15px; background: #fee2e2; color: #b91c1c; border-radius: 8px; font-size: 13px; }
+  
   @media(max-width:900px){.ai-stats{grid-template-columns:repeat(2,1fr)}.ai-hero{align-items:flex-start;flex-direction:column}.ai-primary{width:100%}}
   @media(max-width:560px){.ai-command{padding-bottom:20px}.ai-hero{padding:24px 20px}.ai-stats{gap:9px}.ai-stat{padding:15px}.ai-stat-value{font-size:25px}.ai-table-head{padding:18px}.ai-modal-body,.ai-modal-head{padding:19px}.ai-profile{grid-template-columns:1fr}}
 `;
@@ -80,6 +96,13 @@ export default function AdminAIQueue() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState(null);
+
+  const [decision, setDecision] = useState('review');
+  const [recommendation, setRecommendation] = useState('');
+  const [citizenMessage, setCitizenMessage] = useState('');
+  const [savingDecision, setSavingDecision] = useState(false);
+  const [reviewSuccess, setReviewSuccess] = useState('');
+  const [reviewError, setReviewError] = useState('');
 
   const loadQueue = async () => {
     setLoading(true);
@@ -97,6 +120,50 @@ export default function AdminAIQueue() {
   };
 
   useEffect(() => { loadQueue(); }, []);
+
+  const handleOpenReview = (app) => {
+    setSelected(app);
+    setDecision('review');
+    setRecommendation('');
+    setCitizenMessage('');
+    setReviewSuccess('');
+    setReviewError('');
+  };
+
+  const submitOfficerDecision = async (e) => {
+    e.preventDefault();
+    if (!selected) return;
+
+    if (decision !== 'review' && !citizenMessage.trim()) {
+      setReviewError('Please enter a message for the citizen.');
+      return;
+    }
+
+    setSavingDecision(true);
+    setReviewError('');
+    setReviewSuccess('');
+
+    try {
+      const response = await API.put(`/requests/${selected.id}/status`, {
+        decision,
+        officer_recommendation: recommendation,
+        citizen_message: citizenMessage
+      });
+
+      setReviewSuccess('Decision saved successfully!');
+      
+      setApps(current => current.map(app => 
+        app.id === selected.id ? { ...app, status: decision } : app
+      ));
+
+      setTimeout(() => loadQueue(), 1500);
+
+    } catch (err) {
+      setReviewError(err.response?.data?.message || 'Failed to save decision.');
+    } finally {
+      setSavingDecision(false);
+    }
+  };
 
   const metrics = useMemo(() => ({
     total: apps.length,
@@ -140,21 +207,117 @@ export default function AdminAIQueue() {
                   <td className="ai-service">{app.service_type || 'Service request'}</td>
                   <td><div className="ai-summary">{app.ai_summary || 'No AI summary available yet.'}</div><div className="ai-instruction">{app.ai_instructions || app.ai_recommendation || 'Officer review required'}</div></td>
                   <td><span className="ai-status" style={badge}>{app.status || 'submitted'}</span></td>
-                  <td><button className="ai-view" type="button" onClick={() => setSelected(app)}>View</button></td>
+                  <td><button className="ai-view" type="button" onClick={() => handleOpenReview(app)}>Review →</button></td>
                 </tr>;
               })}
             </tbody></table></div>
           )}
         </section>
 
-        {selected && <div className="ai-modal-backdrop" onClick={() => setSelected(null)}><div className="ai-modal" onClick={(event) => event.stopPropagation()}>
-          <div className="ai-modal-head"><div><h2>Application details</h2><p>{selected.reference_number || `APP-${selected.id}`} · {selected.service_type || 'Service request'}</p></div><button className="ai-close" type="button" onClick={() => setSelected(null)} aria-label="Close">×</button></div>
-          <div className="ai-modal-body">
-            <div className="ai-analysis"><h3>AI analysis</h3><p>{selected.ai_summary || 'No AI summary has been generated for this application.'}</p><p style={{ marginTop: 10, fontWeight: 800, color: selected.ai_recommendation === 'approve' ? '#007936' : '#9a6500' }}>{selected.ai_instructions || selected.ai_recommendation || 'Officer review required'}</p></div>
-            <div className="ai-profile"><div className="ai-profile-item"><span>Full name</span><strong>{selected.full_name || '—'}</strong></div><div className="ai-profile-item"><span>National ID</span><strong>{selected.national_id || '—'}</strong></div><div className="ai-profile-item"><span>Email</span><strong>{selected.email || '—'}</strong></div><div className="ai-profile-item"><span>Department</span><strong>{selected.department || '—'}</strong></div><div className="ai-profile-item"><span>Service</span><strong>{selected.service_type || '—'}</strong></div><div className="ai-profile-item"><span>Status</span><strong>{selected.status || '—'}</strong></div></div>
-            <button className="ai-close-footer" type="button" onClick={() => setSelected(null)}>Close review</button>
+        {selected && <div className="ai-modal-backdrop" onClick={() => setSelected(null)}>
+          <div className="ai-modal" onClick={(event) => event.stopPropagation()}>
+            <div className="ai-modal-head">
+              <div>
+                <h2>Application Review</h2>
+                <p>{selected.reference_number || `APP-${selected.id}`} · {selected.service_type || 'Service request'}</p>
+              </div>
+              <button className="ai-close" type="button" onClick={() => setSelected(null)} aria-label="Close">×</button>
+            </div>
+            
+            <div className="ai-modal-body">
+              
+              {/* AI Analysis Section */}
+              <div className="ai-analysis">
+                <h3>AI Analysis</h3>
+                <p>{selected.ai_summary || 'No AI summary has been generated for this application.'}</p>
+                <p style={{ marginTop: 10, fontWeight: 800, color: selected.ai_recommendation === 'approve' ? '#007936' : '#9a6500' }}>
+                  {selected.ai_instructions || selected.ai_recommendation || 'Officer review required'}
+                </p>
+              </div>
+
+              {/* Citizen Profile */}
+              <div className="ai-profile">
+                <div className="ai-profile-item"><span>Full name</span><strong>{selected.full_name || '—'}</strong></div>
+                <div className="ai-profile-item"><span>National ID</span><strong>{selected.national_id || '—'}</strong></div>
+                <div className="ai-profile-item"><span>Email</span><strong>{selected.email || '—'}</strong></div>
+                <div className="ai-profile-item"><span>Service</span><strong>{selected.service_type || '—'}</strong></div>
+                <div className="ai-profile-item"><span>Status</span><strong>{selected.status || '—'}</strong></div>
+              </div>
+
+              {/* SUPPORTING DOCUMENTS SECTION */}
+              <div style={{ marginTop: '20px' }}>
+                <h3 style={{ fontSize: '13px', color: '#00209F', marginBottom: '10px', textTransform: 'uppercase' }}>
+                  Supporting Documents
+                </h3>
+                {selected.documents && selected.documents.length > 0 ? (
+                  <div className="doc-list">
+                    {selected.documents.map((doc) => (
+                      <div className="doc-item" key={doc.id}>
+                        <span>📄 {doc.file_name}</span>
+                        <a 
+                          href={`http://127.0.0.1:5000${doc.file_path}`} 
+                          target="_blank" 
+                          rel="noreferrer"
+                          className="doc-link"
+                        >
+                          Open File
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ padding: '10px', background: '#f8f9fa', color: '#718096', borderRadius: '8px', fontSize: '13px' }}>
+                    No documents uploaded for this application.
+                  </div>
+                )}
+              </div>
+
+              {/* OFFICER REVIEW FORM */}
+              <div className="review-form">
+                <h3>Officer Decision</h3>
+                
+                {reviewSuccess && <div className="review-success">{reviewSuccess}</div>}
+                {reviewError && <div className="review-error">{reviewError}</div>}
+
+                <form onSubmit={submitOfficerDecision}>
+                  <label className="review-label">Internal Recommendation (Only visible to officers)</label>
+                  <textarea 
+                    className="review-input" 
+                    value={recommendation} 
+                    onChange={(e) => setRecommendation(e.target.value)} 
+                    placeholder="Your findings..."
+                  />
+
+                  <label className="review-label">Final Decision</label>
+                  <select 
+                    className="review-input" 
+                    value={decision} 
+                    onChange={(e) => setDecision(e.target.value)}
+                  >
+                    <option value="review">Keep Under Review</option>
+                    <option value="request_info">Request More Information</option>
+                    <option value="approve">Approve Application</option>
+                    <option value="reject">Reject Application</option>
+                  </select>
+
+                  <label className="review-label">Message to Citizen (Required for Approve/Reject/Request)</label>
+                  <textarea 
+                    className="review-input" 
+                    value={citizenMessage} 
+                    onChange={(e) => setCitizenMessage(e.target.value)} 
+                    placeholder="The citizen will see this notification..."
+                  />
+
+                  <button type="submit" className="review-submit" disabled={savingDecision}>
+                    {savingDecision ? 'Submitting...' : 'Submit Decision'}
+                  </button>
+                </form>
+              </div>
+
+              <button className="ai-close-footer" type="button" onClick={() => setSelected(null)}>Close</button>
+            </div>
           </div>
-        </div></div>}
+        </div>}
       </div>
     </OfficerLayout>
   );

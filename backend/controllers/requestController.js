@@ -1,9 +1,8 @@
+
 const db = require('../config/db');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const PDFDocument = require('pdfkit');
-const QRCode = require('qrcode');
 
 const ALLOWED_STATUSES = [
   'pending',
@@ -25,12 +24,23 @@ const EMPLOYEE_ROLES = [
   'passport'
 ];
 
-const DEMO_DIRECTORY = path.join(
+const ALLOWED_DECISIONS = [
+  'approve',
+  'reject',
+  'request_info',
+  'review'
+];
+
+const REQUEST_UPLOAD_DIRECTORY = path.join(
   __dirname,
   '..',
   'uploads',
-  'demo-documents'
+  'requests'
 );
+
+/* =========================================================
+   GENERAL HELPERS
+========================================================= */
 
 function getUserId(req) {
   return req.user?.id ?? req.user?.user_id;
@@ -56,6 +66,7 @@ function canAccessRequest(req, application) {
   }
 
   const role = getUserRole(req);
+
   const department = String(
     application.department || ''
   ).toLowerCase();
@@ -84,20 +95,10 @@ function makeReference() {
     .toUpperCase()}`;
 }
 
-function makeDocumentNumber() {
-  return `DEMO-ID-${Date.now()}-${crypto
-    .randomBytes(3)
-    .toString('hex')
-    .toUpperCase()}`;
-}
-
-function publicBaseUrl(req) {
-  return String(
-    process.env.PUBLIC_BASE_URL ||
-    `${req.protocol}://${req.get('host')}`
-  ).replace(/\/+$/, '');
-}
-
+/**
+ * Saves a citizen notification.
+ * This helper is for operations outside a database transaction.
+ */
 async function notifyCitizen(userId, message) {
   try {
     await db.execute(
@@ -107,13 +108,24 @@ async function notifyCitizen(userId, message) {
       [userId, message]
     );
   } catch (error) {
-    console.error('Notification creation failed:', error.message);
+    console.error(
+      'Notification creation failed:',
+      error.message
+    );
   }
 }
 
+/**
+ * Gets uploaded documents for an application.
+ */
 async function getDocuments(requestId) {
   const [documents] = await db.execute(
-    `SELECT id, request_id, file_name, file_path, uploaded_at
+    `SELECT
+       id,
+       request_id,
+       file_name,
+       file_path,
+       uploaded_at
      FROM request_documents
      WHERE request_id = ?
      ORDER BY uploaded_at DESC`,
@@ -126,6 +138,10 @@ async function getDocuments(requestId) {
   }));
 }
 
+/**
+ * Gets one application with applicant details,
+ * AI assessment and officer review information.
+ */
 async function getRequestById(id) {
   const [rows] = await db.execute(
     `SELECT
@@ -138,16 +154,36 @@ async function getRequestById(id) {
        sr.status,
        sr.created_at,
        sr.updated_at,
+
+       sr.ai_summary,
+       sr.ai_recommendation,
+       sr.ai_risk_score,
+       sr.ai_processed_at,
+       sr.ai_findings,
+
+       sr.officer_recommendation,
+       sr.officer_feedback,
+       sr.officer_decision,
+       sr.officer_reviewed_by,
+       sr.officer_reviewed_at,
+
        u.full_name,
        u.national_id,
        u.email,
+
        cp.date_of_birth,
        cp.gender,
        cp.address,
        cp.district
+
      FROM service_requests sr
-     LEFT JOIN users u ON u.id = sr.user_id
-     LEFT JOIN citizen_profiles cp ON cp.user_id = sr.user_id
+
+     LEFT JOIN users u
+       ON u.id = sr.user_id
+
+     LEFT JOIN citizen_profiles cp
+       ON cp.user_id = sr.user_id
+
      WHERE sr.id = ?
      LIMIT 1`,
     [id]
@@ -157,9 +193,22 @@ async function getRequestById(id) {
 }
 
 /**
- * POST /api/requests
- * Submit an application.
+ * Inserts a notification using an existing transaction connection.
  */
+async function insertNotification(connection, userId, message) {
+  await connection.execute(
+    `INSERT INTO notifications
+       (user_id, message, is_read, created_at)
+     VALUES (?, ?, 0, CURRENT_TIMESTAMP)`,
+    [userId, message]
+  );
+}
+
+/* =========================================================
+   CREATE APPLICATION
+   POST /api/requests
+========================================================= */
+
 exports.createRequest = async (req, res) => {
   let connection;
   let transactionStarted = false;
@@ -182,9 +231,17 @@ exports.createRequest = async (req, res) => {
       });
     }
 
-    const serviceType = String(req.body.service_type || '').trim();
-    const department = String(req.body.department || '').trim();
-    const notes = String(req.body.notes || '').trim();
+    const serviceType = String(
+      req.body.service_type || ''
+    ).trim();
+
+    const department = String(
+      req.body.department || ''
+    ).trim();
+
+    const notes = String(
+      req.body.notes || ''
+    ).trim();
 
     if (!serviceType || !department) {
       return res.status(400).json({
@@ -192,7 +249,10 @@ exports.createRequest = async (req, res) => {
       });
     }
 
-    if (serviceType.length > 150 || department.length > 100) {
+    if (
+      serviceType.length > 150 ||
+      department.length > 100
+    ) {
       return res.status(400).json({
         message: 'Service type or department is too long.'
       });
@@ -204,7 +264,6 @@ exports.createRequest = async (req, res) => {
       });
     }
 
-    // Reject applications from inactive citizens.
     const [users] = await db.execute(
       'SELECT status FROM users WHERE id = ? LIMIT 1',
       [userId]
@@ -216,21 +275,23 @@ exports.createRequest = async (req, res) => {
       });
     }
 
-    // --- PREVENT DUPLICATE APPLICATIONS ---
     const [existing] = await db.execute(
-      `SELECT id, reference_number FROM service_requests
-       WHERE user_id = ? AND service_type = ?
-       AND status NOT IN ('completed', 'rejected', 'cancelled')
+      `SELECT id, reference_number
+       FROM service_requests
+       WHERE user_id = ?
+         AND service_type = ?
+         AND status NOT IN ('completed', 'rejected', 'cancelled')
        LIMIT 1`,
       [userId, serviceType]
     );
 
     if (existing.length > 0) {
       return res.status(409).json({
-        message: `You already have an active application for ${serviceType} (Ref: ${existing[0].reference_number}). Please wait for it to be processed.`
+        message:
+          `You already have an active application for ${serviceType} ` +
+          `(Ref: ${existing[0].reference_number}). Please wait for it to be processed.`
       });
     }
-    // ---------------------------------------
 
     connection = await db.getConnection();
 
@@ -270,13 +331,17 @@ exports.createRequest = async (req, res) => {
 
         requestId = result.insertId;
         break;
+
       } catch (error) {
         if (transactionStarted) {
           await connection.rollback();
           transactionStarted = false;
         }
 
-        if (error.code === 'ER_DUP_ENTRY' && attempts < 5) {
+        if (
+          error.code === 'ER_DUP_ENTRY' &&
+          attempts < 5
+        ) {
           continue;
         }
 
@@ -285,13 +350,18 @@ exports.createRequest = async (req, res) => {
     }
 
     if (!requestId) {
-      throw new Error('Unable to create a unique application reference.');
+      throw new Error(
+        'Unable to create a unique application reference.'
+      );
     }
 
     for (const file of uploadedFiles) {
       await connection.execute(
         `INSERT INTO request_documents (
-           request_id, file_name, file_path, uploaded_at
+           request_id,
+           file_name,
+           file_path,
+           uploaded_at
          )
          VALUES (?, ?, ?, CURRENT_TIMESTAMP)`,
         [
@@ -307,6 +377,7 @@ exports.createRequest = async (req, res) => {
     }
 
     await connection.commit();
+
     transactionStarted = false;
     committed = true;
 
@@ -329,31 +400,34 @@ exports.createRequest = async (req, res) => {
       },
       documents_uploaded: uploadedFiles.length
     });
+
   } catch (error) {
     if (connection && transactionStarted) {
       try {
         await connection.rollback();
       } catch (rollbackError) {
-        console.error('Rollback failed:', rollbackError.message);
+        console.error(
+          'Rollback failed:',
+          rollbackError.message
+        );
       }
     }
 
     if (!committed) {
-      const uploadDirectory = path.join(
-        __dirname,
-        '..',
-        'uploads',
-        'requests'
-      );
-
       for (const file of uploadedFiles) {
         try {
           fs.unlinkSync(
-            path.join(uploadDirectory, path.basename(file.filename))
+            path.join(
+              REQUEST_UPLOAD_DIRECTORY,
+              path.basename(file.filename)
+            )
           );
         } catch (fileError) {
           if (fileError.code !== 'ENOENT') {
-            console.warn('File cleanup failed:', fileError.message);
+            console.warn(
+              'File cleanup failed:',
+              fileError.message
+            );
           }
         }
       }
@@ -364,15 +438,19 @@ exports.createRequest = async (req, res) => {
     return res.status(500).json({
       message: 'Unable to submit application. Check the backend terminal.'
     });
+
   } finally {
-    if (connection) connection.release();
+    if (connection) {
+      connection.release();
+    }
   }
 };
 
-/**
- * GET /api/requests/queue
- * Department-filtered officer queue.
- */
+/* =========================================================
+   OFFICER QUEUE
+   GET /api/requests/queue
+========================================================= */
+
 exports.getQueue = async (req, res) => {
   try {
     if (!isEmployee(req)) {
@@ -392,18 +470,33 @@ exports.getQueue = async (req, res) => {
          sr.status,
          sr.created_at,
          sr.updated_at,
+
+         sr.ai_summary,
+         sr.ai_recommendation,
+         sr.ai_risk_score,
+         sr.ai_processed_at,
+         sr.ai_findings,
+
          u.full_name,
          u.national_id,
          u.email,
+
          cp.date_of_birth,
+
          (
            SELECT COUNT(*)
            FROM request_documents rd
            WHERE rd.request_id = sr.id
          ) AS document_count
+
        FROM service_requests sr
-       LEFT JOIN users u ON u.id = sr.user_id
-       LEFT JOIN citizen_profiles cp ON cp.user_id = sr.user_id
+
+       LEFT JOIN users u
+         ON u.id = sr.user_id
+
+       LEFT JOIN citizen_profiles cp
+         ON cp.user_id = sr.user_id
+
        ORDER BY sr.created_at DESC`
     );
 
@@ -419,6 +512,7 @@ exports.getQueue = async (req, res) => {
     );
 
     return res.json(result);
+
   } catch (error) {
     console.error('getQueue error:', error);
 
@@ -428,10 +522,11 @@ exports.getQueue = async (req, res) => {
   }
 };
 
-/**
- * GET /api/requests/:id
- * Officer-only application details.
- */
+/* =========================================================
+   APPLICATION DETAILS
+   GET /api/requests/:id
+========================================================= */
+
 exports.getRequestDetail = async (req, res) => {
   try {
     if (!isEmployee(req)) {
@@ -440,7 +535,15 @@ exports.getRequestDetail = async (req, res) => {
       });
     }
 
-    const application = await getRequestById(req.params.id);
+    const id = Number(req.params.id);
+
+    if (!Number.isSafeInteger(id) || id < 1) {
+      return res.status(400).json({
+        message: 'Invalid application ID.'
+      });
+    }
+
+    const application = await getRequestById(id);
 
     if (!application) {
       return res.status(404).json({
@@ -454,20 +557,23 @@ exports.getRequestDetail = async (req, res) => {
       });
     }
 
-    application.documents = await getDocuments(application.id);
-    application.document_count = application.documents.length;
-
-    const [issued] = await db.execute(
-      `SELECT id, document_type, document_number, status, issued_at
-       FROM demo_issued_documents
-       WHERE request_id = ?
-       LIMIT 1`,
-      [application.id]
+    application.documents = await getDocuments(
+      application.id
     );
 
-    application.demo_document = issued[0] || null;
+    application.document_count =
+      application.documents.length;
+
+    /*
+     * The demo_issued_documents table does not exist.
+     * The real issued_documents table has a different schema.
+     *
+     * Therefore, do not query the missing demo table here.
+     */
+    application.demo_document = null;
 
     return res.json(application);
+
   } catch (error) {
     console.error('getRequestDetail error:', error);
 
@@ -477,11 +583,29 @@ exports.getRequestDetail = async (req, res) => {
   }
 };
 
-/**
- * PUT /api/requests/:id/status
- * Officer status review and citizen notification.
- */
+/* =========================================================
+   OFFICER REVIEW AND DECISION
+   PUT /api/requests/:id/status
+
+   Expected request body example:
+
+   {
+     "decision": "request_info",
+     "officer_recommendation": "The applicant must provide ...",
+     "citizen_message": "Please upload a clearer copy ... "
+   }
+
+   Supported decisions:
+   approve
+   reject
+   request_info
+   review
+========================================================= */
+
 exports.updateRequestStatus = async (req, res) => {
+  let connection;
+  let transactionStarted = false;
+
   try {
     if (!isEmployee(req)) {
       return res.status(403).json({
@@ -489,341 +613,368 @@ exports.updateRequestStatus = async (req, res) => {
       });
     }
 
+    const officerId = getUserId(req);
+
+    if (!officerId) {
+      return res.status(401).json({
+        message: 'Officer identity could not be verified.'
+      });
+    }
+
     const id = Number(req.params.id);
-    const status = normalizeStatus(req.body.status);
-    const reason = String(req.body.rejection_reason || '').trim();
 
     if (!Number.isSafeInteger(id) || id < 1) {
-      return res.status(400).json({ message: 'Invalid application ID.' });
-    }
-
-    if (!ALLOWED_STATUSES.includes(status)) {
       return res.status(400).json({
-        message: 'Invalid application status.',
-        allowedStatuses: ALLOWED_STATUSES
+        message: 'Invalid application ID.'
       });
     }
 
-    if (status === 'rejected' && !reason) {
+    const decision = normalizeStatus(
+      req.body.decision || req.body.status
+    );
+
+    const officerRecommendation = String(
+      req.body.officer_recommendation || ''
+    ).trim();
+
+    const citizenMessage = String(
+      req.body.citizen_message ||
+      req.body.officer_feedback ||
+      ''
+    ).trim();
+
+    const rejectionReason = String(
+      req.body.rejection_reason || ''
+    ).trim();
+
+    if (!ALLOWED_DECISIONS.includes(decision)) {
       return res.status(400).json({
-        message: 'Provide a reason before rejecting the application.'
+        message: 'Invalid officer decision.',
+        allowedDecisions: ALLOWED_DECISIONS
       });
     }
 
-    const application = await getRequestById(id);
+    if (officerRecommendation.length > 10000) {
+      return res.status(400).json({
+        message: 'Officer recommendation is too long.'
+      });
+    }
+
+    if (citizenMessage.length > 5000) {
+      return res.status(400).json({
+        message: 'Citizen message is too long.'
+      });
+    }
+
+    let newStatus;
+
+    switch (decision) {
+      case 'approve':
+        newStatus = 'approved';
+        break;
+
+      case 'reject':
+        newStatus = 'rejected';
+        break;
+
+      case 'request_info':
+        newStatus = 'review';
+        break;
+
+      case 'review':
+        newStatus = 'review';
+        break;
+
+      default:
+        return res.status(400).json({
+          message: 'Unsupported decision.'
+        });
+    }
+
+    if (decision === 'reject' && !rejectionReason && !citizenMessage) {
+      return res.status(400).json({
+        message: 'Provide a rejection reason or a message to the citizen.'
+      });
+    }
+
+    if (decision === 'request_info' && !citizenMessage) {
+      return res.status(400).json({
+        message: 'Provide a message explaining what information the citizen must submit.'
+      });
+    }
+
+    if (decision === 'approve' && !citizenMessage) {
+      return res.status(400).json({
+        message: 'Provide a message informing the citizen of the approval.'
+      });
+    }
+
+    connection = await db.getConnection();
+
+    await connection.beginTransaction();
+    transactionStarted = true;
+
+    /*
+     * Lock the application row while the officer reviews it.
+     * This prevents two officers from overwriting each other's
+     * decisions at the same time.
+     */
+    const [rows] = await connection.execute(
+      `SELECT
+         id,
+         reference_number,
+         user_id,
+         department,
+         status,
+         notes
+       FROM service_requests
+       WHERE id = ?
+       LIMIT 1
+       FOR UPDATE`,
+      [id]
+    );
+
+    const application = rows[0];
 
     if (!application) {
-      return res.status(404).json({ message: 'Application not found.' });
+      await connection.rollback();
+      transactionStarted = false;
+
+      return res.status(404).json({
+        message: 'Application not found.'
+      });
     }
 
     if (!canAccessRequest(req, application)) {
+      await connection.rollback();
+      transactionStarted = false;
+
       return res.status(403).json({
         message: 'You cannot update this department’s application.'
       });
     }
 
-    const [issued] = await db.execute(
-      `SELECT id FROM demo_issued_documents
-       WHERE request_id = ? LIMIT 1`,
-      [id]
-    );
+    /*
+     * The old demo document protection check has been removed
+     * because demo_issued_documents does not exist in the database.
+     *
+     * Demo PDF issuance is disabled below until a compatible
+     * database schema is configured.
+     */
 
-    if (issued.length && status !== 'approved') {
-      return res.status(409).json({
-        message: 'A demo document has already been issued. Revoke it through a separate controlled workflow first.'
-      });
-    }
+    const previousStatus = application.status;
 
-    const oldStatus = application.status;
-    const newNotes = status === 'rejected'
-      ? `${application.notes || ''}\n\nOfficer rejection reason: ${reason}`.trim()
-      : application.notes;
+    const finalCitizenMessage =
+      decision === 'reject' && !citizenMessage
+        ? rejectionReason
+        : citizenMessage;
 
-    await db.execute(
+    /*
+     * Store the officer's internal recommendation separately
+     * from the message shown to the citizen.
+     *
+     * Do not put private officer notes into application notes.
+     */
+    await connection.execute(
       `UPDATE service_requests
-       SET status = ?,
-           notes = ?,
-           updated_at = CURRENT_TIMESTAMP
+       SET
+         status = ?,
+         officer_recommendation = ?,
+         officer_feedback = ?,
+         officer_decision = ?,
+         officer_reviewed_by = ?,
+         officer_reviewed_at = CURRENT_TIMESTAMP,
+         updated_at = CURRENT_TIMESTAMP
        WHERE id = ?`,
-      [status, newNotes || null, id]
+      [
+        newStatus,
+        officerRecommendation || null,
+        finalCitizenMessage || null,
+        decision,
+        officerId,
+        id
+      ]
     );
 
-    await notifyCitizen(
+    /*
+     * Save the audit/history record.
+     */
+    await connection.execute(
+      `INSERT INTO officer_request_history (
+         request_id,
+         officer_id,
+         previous_status,
+         new_status,
+         decision,
+         officer_recommendation,
+         citizen_message,
+         created_at
+       )
+       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [
+        id,
+        officerId,
+        previousStatus,
+        newStatus,
+        decision,
+        officerRecommendation || null,
+        finalCitizenMessage || null
+      ]
+    );
+
+    /*
+     * Save the citizen notification inside the same transaction.
+     */
+    const notificationMessage =
+      `Application ${application.reference_number}: ` +
+      `${finalCitizenMessage || `Your application status is now ${newStatus}.`}`;
+
+    await insertNotification(
+      connection,
       application.user_id,
-      `Application ${application.reference_number} status changed from ${oldStatus} to ${status}.${status === 'rejected' ? ` Reason: ${reason}` : ''}`
+      notificationMessage
     );
 
-    return res.json({
-      message: 'Application status updated successfully.',
+    await connection.commit();
+    transactionStarted = false;
+
+    return res.status(200).json({
+      message: 'Officer decision saved successfully.',
       id,
       reference_number: application.reference_number,
-      previous_status: oldStatus,
-      status
+      previous_status: previousStatus,
+      status: newStatus,
+      decision,
+      officer_recommendation: officerRecommendation || null,
+      citizen_message: finalCitizenMessage || null,
+      reviewed_by: officerId,
+      reviewed_at: new Date().toISOString()
     });
+
   } catch (error) {
+    if (connection && transactionStarted) {
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error(
+          'Decision rollback failed:',
+          rollbackError.message
+        );
+      }
+    }
+
     console.error('updateRequestStatus error:', error);
 
     return res.status(500).json({
-      message: 'Unable to update application status.'
+      message: 'Unable to save the officer decision.'
     });
+
+  } finally {
+    if (connection) {
+      connection.release();
+    }
   }
 };
 
-/**
- * POST /api/requests/:id/issue-demo
- * Issue a demonstration PDF only after officer approval.
- */
-exports.issueDemoDocument = async (req, res) => {
-  let pdfPath;
+/* =========================================================
+   APPLICATION DECISION HISTORY
+   GET /api/requests/:id/history
+========================================================= */
 
+exports.getRequestHistory = async (req, res) => {
   try {
     if (!isEmployee(req)) {
       return res.status(403).json({
-        message: 'Only authorized officers can issue demo documents.'
+        message: 'You are not authorized to view decision history.'
       });
     }
 
     const id = Number(req.params.id);
 
     if (!Number.isSafeInteger(id) || id < 1) {
-      return res.status(400).json({ message: 'Invalid application ID.' });
+      return res.status(400).json({
+        message: 'Invalid application ID.'
+      });
     }
 
     const application = await getRequestById(id);
 
     if (!application) {
-      return res.status(404).json({ message: 'Application not found.' });
+      return res.status(404).json({
+        message: 'Application not found.'
+      });
     }
 
     if (!canAccessRequest(req, application)) {
       return res.status(403).json({
-        message: 'You cannot issue a document for this department.'
+        message: 'You cannot access this department’s application.'
       });
     }
 
-    if (normalizeStatus(application.status) !== 'approved') {
-      return res.status(409).json({
-        message: 'An officer must approve the application before issuing a demo document.'
-      });
-    }
-
-    const service = String(application.service_type || '').toLowerCase();
-
-    if (
-      !service.includes('national id') &&
-      !service.includes('national identity') &&
-      !service.includes('birth certificate')
-    ) {
-      return res.status(400).json({
-        message: 'Demo issuance is available only for National ID and Birth Certificate applications.'
-      });
-    }
-
-    const documentType = service.includes('birth')
-      ? 'DEMO BIRTH CERTIFICATE'
-      : 'DEMO NATIONAL ID';
-
-    const [existing] = await db.execute(
-      `SELECT id, document_number, status, issued_at
-       FROM demo_issued_documents
-       WHERE request_id = ?
-       LIMIT 1`,
+    const [history] = await db.execute(
+      `SELECT
+         h.id,
+         h.request_id,
+         h.officer_id,
+         u.full_name AS officer_name,
+         h.previous_status,
+         h.new_status,
+         h.decision,
+         h.officer_recommendation,
+         h.citizen_message,
+         h.created_at
+       FROM officer_request_history h
+       LEFT JOIN users u
+         ON u.id = h.officer_id
+       WHERE h.request_id = ?
+       ORDER BY h.created_at DESC, h.id DESC`,
       [id]
     );
 
-    if (existing.length) {
-      return res.status(409).json({
-        message: 'A demo document has already been issued for this application.',
-        document: existing[0]
+    return res.status(200).json(history);
+
+  } catch (error) {
+    console.error('getRequestHistory error:', error);
+
+    return res.status(500).json({
+      message: 'Unable to load decision history.'
+    });
+  }
+};
+
+/* =========================================================
+   ISSUE DEMO DOCUMENT
+   POST /api/requests/:id/issue-demo
+
+   TEMPORARILY DISABLED
+
+   The existing database contains issued_documents,
+   not demo_issued_documents.
+
+   The existing issued_documents schema stores document_data
+   as JSON and does not contain the file_path column required
+   by the old demo PDF system.
+
+   No database tables or existing documents are modified.
+========================================================= */
+
+exports.issueDemoDocument = async (req, res) => {
+  try {
+    if (!isEmployee(req)) {
+      return res.status(403).json({
+        message: 'Only authorized officers can issue documents.'
       });
     }
 
-    const token = crypto.randomBytes(32).toString('hex');
-    const documentNumber = makeDocumentNumber();
-
-    const baseUrl = publicBaseUrl(req);
-    const verificationUrl =
-      `${baseUrl}/api/requests/demo-verification/${token}`;
-
-    fs.mkdirSync(DEMO_DIRECTORY, { recursive: true });
-
-    const filename = `${crypto.randomUUID()}.pdf`;
-    pdfPath = path.join(DEMO_DIRECTORY, filename);
-
-    const qrDataUrl = await QRCode.toDataURL(verificationUrl, {
-      errorCorrectionLevel: 'M',
-      margin: 2,
-      width: 240
+    return res.status(503).json({
+      message:
+        'Demo PDF issuance is temporarily unavailable because the database schema does not support the demo document system.',
+      details:
+        'The existing issued_documents table stores document_data as JSON and does not contain the required file_path column.',
+      suggestion:
+        'Officer decisions and application approvals are still available.'
     });
 
-    const qrImage = Buffer.from(
-      qrDataUrl.replace(/^data:image\/png;base64,/, ''),
-      'base64'
-    );
-
-    await new Promise((resolve, reject) => {
-      const pdf = new PDFDocument({
-        size: 'A4',
-        margins: { top: 55, bottom: 55, left: 55, right: 55 }
-      });
-
-      const output = fs.createWriteStream(pdfPath);
-
-      output.on('finish', resolve);
-      output.on('error', reject);
-      pdf.on('error', reject);
-
-      pdf.pipe(output);
-
-      pdf.rect(0, 0, 595, 842).fill('#ffffff');
-
-      pdf.fillColor('#b91c1c')
-        .fontSize(21)
-        .font('Helvetica-Bold')
-        .text('DEMO DOCUMENT — NOT OFFICIAL', 45, 42, {
-          width: 505,
-          align: 'center'
-        });
-
-      pdf.moveTo(55, 82)
-        .lineTo(540, 82)
-        .strokeColor('#b91c1c')
-        .lineWidth(2)
-        .stroke();
-
-      pdf.fillColor('#111827')
-        .fontSize(16)
-        .font('Helvetica-Bold')
-        .text('MYGOV LESOTHO — DEMONSTRATION', 55, 105, {
-          width: 485,
-          align: 'center'
-        });
-
-      pdf.fontSize(18)
-        .fillColor('#1d4ed8')
-        .text(documentType, 55, 145, {
-          width: 485,
-          align: 'center'
-        });
-
-      pdf.fillColor('#111827').fontSize(11);
-
-      const fields = [
-        ['Document number', documentNumber],
-        ['Application reference', application.reference_number],
-        ['Applicant name', application.full_name || 'Not supplied'],
-        ['National ID (masked)', application.national_id
-          ? `********${String(application.national_id).slice(-3)}`
-          : 'Not supplied'],
-        ['Service', application.service_type],
-        ['Department', application.department],
-        ['Issue date', new Date().toISOString().slice(0, 10)],
-        ['Status', 'DEMO ONLY — NOT VALID FOR IDENTIFICATION']
-      ];
-
-      let y = 205;
-
-      for (const [label, value] of fields) {
-        pdf.font('Helvetica-Bold')
-          .text(`${label}:`, 65, y, { width: 145 });
-
-        pdf.font('Helvetica')
-          .text(String(value || 'Not supplied'), 215, y, {
-            width: 310
-          });
-
-        y += 32;
-      }
-
-      pdf.image(qrImage, 225, y + 5, {
-        width: 125,
-        height: 125
-      });
-
-      pdf.fillColor('#b91c1c')
-        .font('Helvetica-Bold')
-        .fontSize(12)
-        .text('DEMO ONLY — NOT A GOVERNMENT CREDENTIAL', 55, 730, {
-          width: 485,
-          align: 'center'
-        });
-
-      pdf.fillColor('#374151')
-        .font('Helvetica')
-        .fontSize(9)
-        .text(
-          'This file is generated for software demonstration and testing. ' +
-          'It is not an official Lesotho identity document, birth certificate, ' +
-          'proof of citizenship, or proof of identity.',
-          65,
-          752,
-          { width: 465, align: 'center' }
-        );
-
-      pdf.end();
-    });
-
-    let insertedId;
-
-    try {
-      const [result] = await db.execute(
-        `INSERT INTO demo_issued_documents (
-           request_id,
-           user_id,
-           document_type,
-           document_number,
-           verification_token,
-           file_path,
-           status,
-           issued_by,
-           issued_at
-         )
-         VALUES (?, ?, ?, ?, ?, ?, 'valid', ?, CURRENT_TIMESTAMP)`,
-        [
-          id,
-          application.user_id,
-          documentType,
-          documentNumber,
-          token,
-          pdfPath,
-          getUserId(req)
-        ]
-      );
-
-      insertedId = result.insertId;
-    } catch (error) {
-      try {
-        fs.unlinkSync(pdfPath);
-      } catch (_) {}
-
-      if (error.code === 'ER_DUP_ENTRY') {
-        return res.status(409).json({
-          message: 'A demo document has already been issued for this application.'
-        });
-      }
-
-      throw error;
-    }
-
-    await notifyCitizen(
-      application.user_id,
-      `A demonstration document for application ${application.reference_number} has been issued. It is not an official government credential.`
-    );
-
-    return res.status(201).json({
-      message: 'Demo document issued successfully.',
-      warning: 'DEMO ONLY — NOT AN OFFICIAL GOVERNMENT DOCUMENT.',
-      document: {
-        id: insertedId,
-        request_id: id,
-        reference_number: application.reference_number,
-        document_type: documentType,
-        document_number: documentNumber,
-        status: 'valid',
-        verification_url: verificationUrl,
-        download_url: `/api/requests/${id}/demo-document`
-      }
-    });
   } catch (error) {
     console.error('issueDemoDocument error:', error);
 
@@ -833,127 +984,50 @@ exports.issueDemoDocument = async (req, res) => {
   }
 };
 
-/**
- * GET /api/requests/demo-verification/:token
- * Public verification endpoint. Exposes minimal information only.
- */
+/* =========================================================
+   VERIFY DEMO DOCUMENT
+   GET /api/requests/demo-verification/:token
+
+   TEMPORARILY DISABLED
+
+   The demo_issued_documents table does not exist.
+========================================================= */
+
 exports.verifyDemoDocument = async (req, res) => {
-  try {
-    const token = String(req.params.token || '');
-
-    if (!/^[a-f0-9]{64}$/i.test(token)) {
-      return res.status(400).json({
-        verified: false,
-        message: 'Invalid verification token.'
-      });
-    }
-
-    const [rows] = await db.execute(
-      `SELECT
-         document_type,
-         document_number,
-         status,
-         issued_at
-       FROM demo_issued_documents
-       WHERE verification_token = ?
-       LIMIT 1`,
-      [token]
-    );
-
-    if (!rows.length) {
-      return res.status(404).json({
-        verified: false,
-        message: 'Demo document not found.'
-      });
-    }
-
-    const doc = rows[0];
-
-    return res.json({
-      verified: doc.status === 'valid',
-      demo_only: true,
-      warning: 'This is a demonstration record, not an official government credential.',
-      document_type: doc.document_type,
-      document_number: doc.document_number,
-      status: doc.status,
-      issued_at: doc.issued_at
-    });
-  } catch (error) {
-    console.error('verifyDemoDocument error:', error);
-
-    return res.status(500).json({
-      verified: false,
-      message: 'Unable to verify this demo document.'
-    });
-  }
+  return res.status(503).json({
+    verified: false,
+    demo_only: true,
+    message:
+      'Demo document verification is temporarily unavailable because the demo document database table has not been configured.'
+  });
 };
 
-/**
- * GET /api/requests/:id/demo-document
- * Download a demo PDF.
- */
+/* =========================================================
+   DOWNLOAD DEMO DOCUMENT
+   GET /api/requests/:id/demo-document
+
+   TEMPORARILY DISABLED
+
+   The demo_issued_documents table does not exist.
+========================================================= */
+
 exports.downloadDemoDocument = async (req, res) => {
   try {
-    const id = Number(req.params.id);
     const userId = getUserId(req);
 
     if (!userId) {
-      return res.status(401).json({ message: 'Please sign in.' });
-    }
-
-    if (!Number.isSafeInteger(id) || id < 1) {
-      return res.status(400).json({ message: 'Invalid application ID.' });
-    }
-
-    const [rows] = await db.execute(
-      `SELECT
-         d.file_path,
-         d.document_number,
-         d.user_id,
-         sr.department
-       FROM demo_issued_documents d
-       JOIN service_requests sr ON sr.id = d.request_id
-       WHERE d.request_id = ? AND d.status = 'valid'
-       LIMIT 1`,
-      [id]
-    );
-
-    if (!rows.length) {
-      return res.status(404).json({
-        message: 'No valid demo document exists for this application.'
+      return res.status(401).json({
+        message: 'Please sign in.'
       });
     }
 
-    const document = rows[0];
+    return res.status(503).json({
+      message:
+        'Demo PDF downloads are temporarily unavailable because the demo document database table has not been configured.',
+      suggestion:
+        'Contact the system administrator for document issuance.'
+    });
 
-    if (Number(document.user_id) !== Number(userId)) {
-      if (!isEmployee(req) || !canAccessRequest(req, document)) {
-        return res.status(403).json({
-          message: 'You cannot download this document.'
-        });
-      }
-    }
-
-    const absolutePath = path.resolve(document.file_path);
-    const allowedDirectory = path.resolve(DEMO_DIRECTORY) + path.sep;
-
-    if (!absolutePath.startsWith(allowedDirectory)) {
-      return res.status(400).json({
-        message: 'Invalid document file path.'
-      });
-    }
-
-    if (!fs.existsSync(absolutePath)) {
-      return res.status(404).json({
-        message: 'The PDF file could not be found.'
-      });
-    }
-
-    res.setHeader('Cache-Control', 'no-store');
-    res.download(
-      absolutePath,
-      `${document.document_number}.pdf`
-    );
   } catch (error) {
     console.error('downloadDemoDocument error:', error);
 

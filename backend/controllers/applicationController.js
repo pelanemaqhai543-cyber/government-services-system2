@@ -1,368 +1,1266 @@
 const db = require('../config/db');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+
 const { callModel } = require('../services/aiClient');
-const { SUMMARY_SCHEMA, buildSummaryPrompt } = require('../services/prompts');
+const {
+  SUMMARY_SCHEMA,
+  buildSummaryPrompt
+} = require('../services/prompts');
 
-const generateRef = (prefix = 'APP') => {
-  const year = new Date().getFullYear();
-  const random = Math.floor(Math.random() * 900000) + 100000;
-  return `${prefix}-${year}-${random}`;
-};
+const ruleEngine = require('../rules');
 
-const SERVICE_PREFIXES = {
-  'Birth Certificate': 'BC', 'National ID Registration': 'ID', 'National ID Renewal': 'IDR',
-  'National ID Replacement': 'IDX', 'Death Certificate': 'DC', 'Marriage Certificate': 'MC',
-  'Passport Application': 'PP', 'Passport Renewal': 'PPR', 'Police Clearance': 'PC',
-  "Driver's Licence": 'DL', 'Vehicle Registration': 'VR', 'Tax Filing': 'TX', 'Pension Application': 'PN',
-};
+let AI_QUOTA_EXHAUSTED = false;
 
-const DEPARTMENT_MAP = {
-  'Birth Certificate': 'home_affairs', 'National ID Registration': 'home_affairs', 'National ID Renewal': 'home_affairs',
-  'National ID Replacement': 'home_affairs', 'Death Certificate': 'home_affairs', 'Marriage Certificate': 'home_affairs',
-  'Passport Application': 'passport', 'Passport Renewal': 'passport', 'Police Clearance': 'police',
-  "Driver's Licence": 'traffic', 'Vehicle Registration': 'traffic', 'Tax Filing': 'finance', 'Pension Application': 'pension',
-};
+const VALID_RECOMMENDATIONS = new Set([
+  'approve',
+  'reject',
+  'request_info',
+  'escalate'
+]);
 
-const PENSION_SERVICES = ['Pension Application', 'Pension Renewal', 'Old-Age Pension'];
+const VALID_STATUSES = new Set([
+  'pending',
+  'review',
+  'approved',
+  'rejected',
+  'completed'
+]);
 
-exports.createApplication = async (req, res) => {
-  const { service_type, form_data, notes, documents } = req.body;
-  const userId = req.user.id;
+function getMissingDocuments(ruleResult) {
+  if (!Array.isArray(ruleResult?.missing_documents)) return [];
+  return ruleResult.missing_documents.filter(
+    doc => doc && doc.document_name
+  );
+}
 
-  if (!service_type) return res.status(400).json({ error: 'MISSING_SERVICE', message: 'Please select a service type.' });
-  const department = DEPARTMENT_MAP[service_type];
-  if (!department) return res.status(400).json({ error: 'INVALID_SERVICE', message: 'Please select a valid service.' });
+function buildCitizenMessage(app, decision, missingDocuments, reason, generated) {
+  const ref = app.reference_number || `application ${app.id}`;
+
+  if (decision === 'approve') {
+    return (
+      `APPLICATION APPROVED - ${ref}\n\n` +
+      `Your application has met the configured requirements and has been approved automatically.\n\n` +
+      (generated.length
+        ? `Issued number(s):\n${generated.join('\n')}\n\n`
+        : '') +
+      `You can check your application dashboard for further details.`
+    );
+  }
+
+  if (decision === 'reject') {
+    return (
+      `APPLICATION NOT APPROVED - ${ref}\n\n` +
+      `Your application did not meet the required eligibility conditions.\n\n` +
+      `Reason: ${reason || 'The configured eligibility requirements were not met.'}\n\n` +
+      `Please contact the relevant department if you need clarification or wish to challenge this decision.`
+    );
+  }
+
+  if (decision === 'request_info') {
+    const details = missingDocuments.map((doc, index) =>
+      `${index + 1}. ${doc.document_name}\n` +
+      `Why required: ${doc.reason}\n` +
+      `What to do: ${doc.action}`
+    ).join('\n\n');
+
+    return (
+      `DOCUMENTS REQUIRED - ${ref}\n\n` +
+      `Your application is missing the following required document(s):\n\n` +
+      `${details}\n\n` +
+      `Please upload the listed document(s) to continue processing your application.`
+    );
+  }
+
+  return (
+    `APPLICATION UNDER REVIEW - ${ref}\n\n` +
+    `${reason || 'Your application needs additional review.'}\n\n` +
+    `An authorised officer can continue reviewing and managing your application.`
+  );
+}
+
+async function generateUniqueBirthCertificateNumber() {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const number =
+      `BC-${new Date().getFullYear()}-${crypto.randomInt(100000, 1000000)}`;
+
+    const [rows] = await db.query(
+      `SELECT id FROM users WHERE birth_certificate_number = ? LIMIT 1`,
+      [number]
+    );
+
+    if (rows.length === 0) return number;
+  }
+
+  throw new Error('Could not generate a unique Birth Certificate number.');
+}
+
+async function generateUniqueNationalID(dateOfBirth, gender) {
+  const date = new Date(dateOfBirth);
+
+  if (Number.isNaN(date.getTime())) {
+    throw new Error('A valid date of birth is required to generate a National ID.');
+  }
+
+  const yy = String(date.getFullYear()).slice(-2);
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  const genderDigit =
+    String(gender || '').toLowerCase() === 'male' ? '5' : '6';
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const sequence = String(
+      crypto.randomInt(0, 1000000)
+    ).padStart(6, '0');
+
+    const number = `${yy}${mm}${dd}${sequence}${genderDigit}`;
+
+    const [rows] = await db.query(
+      `SELECT id FROM users WHERE national_id = ? LIMIT 1`,
+      [number]
+    );
+
+    if (rows.length === 0) return number;
+  }
+
+  throw new Error('Could not generate a unique National ID.');
+}
+
+async function issueOfficialNumbers(app, citizen) {
+  const issued = [];
+  const service = String(app.service_type || '').toLowerCase();
+  const department = String(app.department || '').toLowerCase();
+
+  if (!['home_affairs', 'home-affairs', 'home affairs'].includes(department)) {
+    return issued;
+  }
+
+  if (service.includes('birth')) {
+    const [users] = await db.query(
+      `SELECT birth_certificate_number FROM users WHERE id = ? LIMIT 1`,
+      [app.user_id]
+    );
+
+    if (!users[0]?.birth_certificate_number) {
+      const number = await generateUniqueBirthCertificateNumber();
+
+      await db.query(
+        `UPDATE users
+         SET birth_certificate_number = ?
+         WHERE id = ?
+         AND (birth_certificate_number IS NULL OR birth_certificate_number = '')`,
+        [number, app.user_id]
+      );
+
+      const [updated] = await db.query(
+        `SELECT birth_certificate_number FROM users WHERE id = ?`,
+        [app.user_id]
+      );
+
+      if (updated[0]?.birth_certificate_number) {
+        issued.push(
+          `Birth Certificate Number: ${updated[0].birth_certificate_number}`
+        );
+      }
+    } else {
+      issued.push(
+        `Birth Certificate Number: ${users[0].birth_certificate_number}`
+      );
+    }
+  }
+
+  const isNewId =
+    (service.includes('id') || service.includes('identity')) &&
+    (service.includes('new') || service.includes('registration'));
+
+  if (isNewId) {
+    const [users] = await db.query(
+      `SELECT national_id, date_of_birth, gender
+       FROM users WHERE id = ? LIMIT 1`,
+      [app.user_id]
+    );
+
+    if (!users[0]?.national_id) {
+      const dob = users[0]?.date_of_birth || citizen.date_of_birth;
+      const gender = users[0]?.gender || citizen.gender;
+      const number = await generateUniqueNationalID(dob, gender);
+
+      await db.query(
+        `UPDATE users
+         SET national_id = ?
+         WHERE id = ?
+         AND (national_id IS NULL OR national_id = '')`,
+        [number, app.user_id]
+      );
+
+      const [updated] = await db.query(
+        `SELECT national_id FROM users WHERE id = ?`,
+        [app.user_id]
+      );
+
+      if (updated[0]?.national_id) {
+        issued.push(`National ID Number: ${updated[0].national_id}`);
+      }
+    } else {
+      issued.push(`National ID Number: ${users[0].national_id}`);
+    }
+  }
+
+  return issued;
+}
+
+function manualReviewResult(app, documents, documentCount) {
+  return {
+    ...app,
+    documents: documents || [],
+    doc_count: Number(documentCount || 0),
+    ai_recommendation: 'escalate',
+    ai_summary:
+      'Automated assessment could not be completed. Officer review is required.',
+    ai_instructions:
+      `Your application ${app.reference_number || ''} requires further review by an authorised officer.`,
+    ai_processed: false,
+    ai_pending: true,
+    manual_review_required: true
+  };
+}
+
+function isQuotaError(error) {
+  const message = String(error?.message || '').toLowerCase();
+
+  return (
+    message.includes('insufficient_quota') ||
+    message.includes('credit_balance_exhausted') ||
+    (message.includes('429') &&
+      (message.includes('no credits') || message.includes('quota')))
+  );
+}
+
+function parseFindings(aiResult, ruleResult) {
+  const findings = Array.isArray(aiResult?.findings)
+    ? aiResult.findings
+    : [];
+
+  return [
+    ...findings,
+    { source: 'rule_engine', details: ruleResult }
+  ];
+}
+
+function safeParseJSON(value, fallback) {
+  if (value === null || value === undefined) return fallback;
+  if (typeof value === 'object') return value;
 
   try {
-    const [existing] = await db.query(
-      `SELECT id, status, reference_number FROM service_requests
-       WHERE user_id = ? AND service_type = ?
-       AND status IN ('submitted', 'pending', 'review', 'ready')
-       LIMIT 1`,
-      [userId, service_type]
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function generateReferenceNumber(department) {
+  const prefix =
+    String(department || 'APP')
+      .replace(/[^a-zA-Z]/g, '')
+      .slice(0, 3)
+      .toUpperCase() || 'APP';
+
+  const year = new Date().getFullYear();
+  const random = crypto.randomInt(100000, 999999);
+
+  return `${prefix}-${year}-${random}`;
+}
+
+async function generateUniqueReferenceNumber(department) {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const ref = generateReferenceNumber(department);
+
+    const [rows] = await db.query(
+      `SELECT id FROM service_requests
+       WHERE reference_number = ? LIMIT 1`,
+      [ref]
     );
-    if (existing.length > 0) {
-      return res.status(409).json({
-        error: 'DUPLICATE_APPLICATION',
-        message: `You already have an active application for ${service_type} (ref: ${existing[0].reference_number}).`
+
+    if (rows.length === 0) return ref;
+  }
+
+  throw new Error('Could not generate a unique application reference number.');
+}
+
+function normalizeDepartment(input) {
+  const value = String(input || '').toLowerCase().trim();
+
+  const map = {
+    'home affairs': 'home_affairs',
+    'home-affairs': 'home_affairs',
+    home_affairs: 'home_affairs',
+    homeaffairs: 'home_affairs',
+    traffic: 'traffic',
+    finance: 'finance',
+    pension: 'pension',
+    police: 'police',
+    passport: 'passport'
+  };
+
+  return map[value] || value;
+}
+
+/* ------------------------------------------------------------------
+   MASTER AI QUEUE
+------------------------------------------------------------------ */
+
+exports.getMasterQueue = async (req, res) => {
+  try {
+    const role = String(req.user?.role || '').toLowerCase();
+    const isAdmin = role === 'admin';
+    const isHomeAffairs = role === 'home_affairs';
+
+    let query = `
+      SELECT
+        sr.*,
+        u.full_name,
+        u.national_id,
+        u.email,
+        u.status AS citizen_status,
+        u.birth_certificate_number,
+        u.date_of_birth,
+        u.gender,
+        (SELECT COUNT(*) FROM request_documents rd
+         WHERE rd.request_id = sr.id) AS doc_count
+      FROM service_requests sr
+      INNER JOIN users u ON u.id = sr.user_id
+    `;
+
+    const params = [];
+
+    if (!isAdmin && !isHomeAffairs) {
+      query += ` WHERE LOWER(sr.department) = ? `;
+      params.push(role);
+    }
+
+    query += ` ORDER BY sr.created_at DESC`;
+
+    const [applications] = await db.query(query, params);
+
+    const processedApps = await Promise.all(
+      applications.map(async (app) => {
+        const documentCount = Number(app.doc_count || 0);
+
+        const [documents] = await db.query(
+          `SELECT id, file_name, document_type, uploaded_at
+           FROM request_documents
+           WHERE request_id = ?
+           ORDER BY uploaded_at DESC`,
+          [app.id]
+        );
+
+        const appWithDocuments = {
+          ...app,
+          documents: documents || [],
+          doc_count: documentCount
+        };
+
+        if (app.ai_processed_at && app.ai_recommendation) {
+          return { ...appWithDocuments, ai_processed: true };
+        }
+
+        if (AI_QUOTA_EXHAUSTED) {
+          return manualReviewResult(
+            appWithDocuments,
+            documents,
+            documentCount
+          );
+        }
+
+        const citizen = {
+          full_name: app.full_name,
+          national_id: app.national_id,
+          date_of_birth: app.date_of_birth,
+          gender: app.gender,
+          status: app.citizen_status
+        };
+
+        const applicationForReview = {
+          ...app,
+          documents: (documents || []).map(doc => ({
+            file_name: doc.file_name
+          })),
+          document_count: documentCount
+        };
+
+        try {
+          const ruleResult = await ruleEngine.evaluate(
+            app.department || 'home_affairs',
+            applicationForReview,
+            citizen
+          );
+
+          const missingDocuments = getMissingDocuments(ruleResult);
+
+          const { system, user } = buildSummaryPrompt(
+            applicationForReview,
+            citizen,
+            ruleResult
+          );
+
+          const aiResult = await callModel({
+            system,
+            user,
+            responseSchema: SUMMARY_SCHEMA,
+            temperature: 0.1
+          });
+
+          const aiRecommendation = String(
+            aiResult.recommendation || 'escalate'
+          ).toLowerCase();
+
+          const validRecommendation =
+            VALID_RECOMMENDATIONS.has(aiRecommendation)
+              ? aiRecommendation
+              : 'escalate';
+
+          let decision = validRecommendation;
+
+          if (missingDocuments.length > 0) {
+            decision = 'request_info';
+          } else if (ruleResult?.eligible === false) {
+            decision =
+              validRecommendation === 'reject' ? 'reject' : 'escalate';
+          } else if (ruleResult?.eligible !== true) {
+            decision = 'escalate';
+          }
+
+          const statusByDecision = {
+            approve: 'approved',
+            reject: 'rejected',
+            request_info: 'pending',
+            escalate: 'review'
+          };
+
+          const newStatus = statusByDecision[decision];
+
+          const summary = String(
+            aiResult.summary || ruleResult.reason || 'Assessment completed.'
+          );
+
+          const findings = parseFindings(aiResult, ruleResult);
+
+          let riskScore = Math.round(Number(aiResult.risk_score));
+
+          if (!Number.isFinite(riskScore)) riskScore = 0;
+
+          riskScore = Math.max(0, Math.min(100, riskScore));
+
+          const [saveResult] = await db.query(
+            `UPDATE service_requests
+             SET status = ?,
+                 ai_summary = ?,
+                 ai_recommendation = ?,
+                 ai_risk_score = ?,
+                 ai_findings = ?,
+                 ai_processed_at = NOW()
+             WHERE id = ? AND ai_processed_at IS NULL`,
+            [
+              newStatus,
+              summary,
+              decision,
+              riskScore,
+              JSON.stringify(findings),
+              app.id
+            ]
+          );
+
+          if (saveResult.affectedRows === 0) {
+            const [savedRows] = await db.query(
+              `SELECT * FROM service_requests WHERE id = ?`,
+              [app.id]
+            );
+
+            return {
+              ...appWithDocuments,
+              ...(savedRows[0] || {}),
+              ai_processed: true
+            };
+          }
+
+          let generatedNumbers = [];
+
+          if (decision === 'approve') {
+            try {
+              generatedNumbers = await issueOfficialNumbers(app, citizen);
+            } catch (numberError) {
+              console.error(
+                `Number issuance failed for application ${app.id}:`,
+                numberError.message
+              );
+
+              await db.query(
+                `UPDATE service_requests SET ai_summary = ? WHERE id = ?`,
+                [
+                  `${summary} Approval recorded, but official number issuance needs officer attention: ${numberError.message}`,
+                  app.id
+                ]
+              );
+            }
+          }
+
+          const notification = buildCitizenMessage(
+            app,
+            decision,
+            missingDocuments,
+            ruleResult.reason || summary,
+            generatedNumbers
+          );
+
+          await db.query(
+            `INSERT INTO notifications (user_id, message) VALUES (?, ?)`,
+            [app.user_id, notification]
+          );
+
+          return {
+            ...appWithDocuments,
+            status: newStatus,
+            ai_summary: summary,
+            ai_recommendation: decision,
+            ai_risk_score: riskScore,
+            ai_findings: findings,
+            ai_processed_at: new Date().toISOString(),
+            ai_instructions: notification,
+            ai_processed: true,
+            manual_review_required: decision === 'escalate'
+          };
+        } catch (error) {
+          if (isQuotaError(error)) AI_QUOTA_EXHAUSTED = true;
+
+          console.error(
+            `AI processing failed for application ${app.id}:`,
+            error.message
+          );
+
+          return manualReviewResult(
+            appWithDocuments,
+            documents,
+            documentCount
+          );
+        }
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      count: processedApps.length,
+      ai_available: !AI_QUOTA_EXHAUSTED,
+      message: 'Master application queue loaded successfully.',
+      applications: processedApps
+    });
+  } catch (error) {
+    console.error('MASTER QUEUE CRASHED:', error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'production'
+          ? 'Failed to load the master application queue.'
+          : error.message
+    });
+  }
+};
+
+/* ------------------------------------------------------------------
+   CITIZEN: CREATE APPLICATION
+------------------------------------------------------------------ */
+
+exports.createApplication = async (req, res) => {
+  try {
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required.'
       });
     }
 
-    const [userRows] = await db.query(
-      `SELECT status, is_government_employee, full_name, national_id, date_of_birth, gender
-       FROM users WHERE id = ?`,
-      [userId]
-    );
-    if (userRows.length === 0) return res.status(404).json({ error: 'USER_NOT_FOUND', message: 'User not found' });
+    const {
+      department,
+      service_type,
+      serviceType,
+      details,
+      additional_info,
+      application_data
+    } = req.body || {};
 
-    const user = userRows[0];
-    if (user.status === 'deceased') return res.status(403).json({ error: 'ACCOUNT_DECEASED', message: 'This account cannot submit applications.' });
-    if (PENSION_SERVICES.includes(service_type) && user.is_government_employee) {
-      return res.status(403).json({ error: 'GOV_EMPLOYEE_INELIGIBLE', message: 'Government employees are not eligible for pension.' });
+    const rawDepartment = department || req.body?.dept;
+    const rawService = service_type || serviceType || req.body?.service;
+
+    if (!rawDepartment || !rawService) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both department and service_type are required.'
+      });
     }
 
-    const prefix = SERVICE_PREFIXES[service_type] || 'APP';
-    const ref = generateRef(prefix);
+    const normalizedDepartment = normalizeDepartment(rawDepartment);
+    const referenceNumber =
+      await generateUniqueReferenceNumber(normalizedDepartment);
+
+    const payload = {
+      details: details ?? null,
+      additional_info: additional_info ?? null,
+      application_data: application_data ?? null
+    };
 
     const [result] = await db.query(
       `INSERT INTO service_requests
-       (reference_number, user_id, service_type, department, form_data, notes, status)
-       VALUES (?, ?, ?, ?, ?, ?, 'submitted')`,
-      [ref, userId, service_type, department, JSON.stringify(form_data || {}), notes || null]
+         (user_id, reference_number, department, service_type,
+          status, application_data, created_at)
+       VALUES (?, ?, ?, ?, 'pending', ?, NOW())`,
+      [
+        userId,
+        referenceNumber,
+        normalizedDepartment,
+        String(rawService),
+        JSON.stringify(payload)
+      ]
     );
 
-    const applicationId = result.insertId;
-
-    if (Array.isArray(documents) && documents.length > 0) {
-      for (const doc of documents) {
-        if (!doc.file_data || !doc.file_name) continue;
-        await db.query(
-          `INSERT INTO request_documents (request_id, file_name, file_path) VALUES (?, ?, ?)`,
-          [applicationId, doc.file_name, doc.file_data]
-        );
-      }
-    }
-
-    try {
-      const appForAI = {
-        id: applicationId, reference_number: ref, service_type, department,
-        form_data: form_data || {}, notes: notes || '', documents: documents || [],
-      };
-      const citizen = { full_name: user.full_name, national_id: user.national_id, date_of_birth: user.date_of_birth, gender: user.gender };
-      const { system, user: promptUser } = buildSummaryPrompt(appForAI, citizen, { eligible: true });
-      const aiResult = await callModel({ system, user: promptUser, responseSchema: SUMMARY_SCHEMA, temperature: 0.1 });
-
-      let newStatus = 'review';
-      let notificationMsg = `Your application ${ref} has been received and is being processed.`;
-
-      if (aiResult.recommendation === 'approve') { newStatus = 'approved'; notificationMsg = `Good news! Your application ${ref} has been approved.`; }
-      else if (aiResult.recommendation === 'reject') { newStatus = 'rejected'; notificationMsg = `Your application ${ref} was rejected. Reason: ${aiResult.summary}.`; }
-      else if (aiResult.recommendation === 'request_info') { newStatus = 'review'; notificationMsg = `Action required: Please upload missing documents for ${ref}.`; }
-
-      await db.query(
-        `UPDATE service_requests SET status = ?, ai_summary = ?, ai_recommendation = ?, ai_risk_score = ?, ai_processed_at = NOW() WHERE id = ?`,
-        [newStatus, aiResult.summary, aiResult.recommendation, aiResult.risk_score, applicationId]
-      );
-
-      // GENERATE DOCUMENTS
-      if (newStatus === 'approved') {
-        if (service_type === 'National ID Registration') {
-          if (!user.national_id || String(user.national_id).length !== 13) {
-            if (user.date_of_birth) {
-              const d = new Date(user.date_of_birth);
-              const yy = String(d.getFullYear()).slice(-2);
-              const mm = String(d.getMonth() + 1).padStart(2, '0');
-              const dd = String(d.getDate()).padStart(2, '0');
-              const genderDigit = String(user.gender).toLowerCase() === 'male' ? '5' : '6';
-              const seq = String(Math.floor(Math.random() * 900000) + 100000).padStart(6, '0');
-              const newID = `${yy}${mm}${dd}${seq}${genderDigit}`;
-
-              await db.query(`UPDATE users SET national_id = ? WHERE id = ?`, [newID, userId]);
-              notificationMsg += ` Your National ID is ${newID}.`;
-            }
-          }
-        } else if (service_type === 'Birth Certificate') {
-          const bcNumber = `BC-${new Date().getFullYear()}-${Math.floor(Math.random() * 900000) + 100000}`;
-          await db.query(`UPDATE users SET birth_certificate_number = ? WHERE id = ?`, [bcNumber, userId]);
-          notificationMsg += ` Your Birth Certificate Number is ${bcNumber}.`;
-        } else {
-          const prefixMap = {
-            'Passport Application': 'PP', 'Passport Renewal': 'PPR',
-            "Driver's Licence": 'DL', 'Vehicle Registration': 'VR',
-            'Tax Filing': 'TX', 'Pension Application': 'PN',
-            'Police Clearance': 'PC'
-          };
-          const docPrefix = prefixMap[service_type] || 'DOC';
-          const docNumber = `${docPrefix}-${new Date().getFullYear()}-${Math.floor(Math.random() * 900000) + 100000}`;
-
-          await db.query(`UPDATE users SET other_document_number = ?, other_document_type = ? WHERE id = ?`, [docNumber, service_type, userId]);
-          notificationMsg += ` Your ${service_type} document number is ${docNumber}.`;
-        }
-      }
-
-      await db.query('INSERT INTO notifications (user_id, message) VALUES (?, ?)', [userId, notificationMsg]);
-    } catch (aiErr) {
-      console.error('AI Submission Processing Failed:', aiErr.message);
-      await db.query('INSERT INTO notifications (user_id, message) VALUES (?, ?)', [userId, `Your application ${ref} has been received and is under review.`]);
-    }
-
-    return res.status(201).json({ message: 'Submitted.', reference_number: ref, application_id: applicationId, service_type, department });
-  } catch (err) {
-    console.error('createApplication error:', err);
-    return res.status(500).json({ error: 'SERVER_ERROR', message: 'Unable to submit: ' + err.message });
-  }
-};
-
-exports.updateApplicationDocuments = async (req, res) => {
-  const { documents } = req.body;
-  const applicationId = req.params.id;
-  const userId = req.user.id;
-
-  try {
-    const [apps] = await db.query(
-      `SELECT id, status, reference_number, service_type, department FROM service_requests WHERE id = ? AND user_id = ?`,
-      [applicationId, userId]
+    const [rows] = await db.query(
+      `SELECT * FROM service_requests WHERE id = ? LIMIT 1`,
+      [result.insertId]
     );
-
-    if (apps.length === 0) return res.status(404).json({ message: 'Application not found' });
-    const app = apps[0];
-    if (!['review', 'pending', 'submitted'].includes(app.status)) {
-      return res.status(400).json({ message: 'You can only update applications that are under review.' });
-    }
-
-    if (Array.isArray(documents) && documents.length > 0) {
-      for (const doc of documents) {
-        if (!doc.file_data || !doc.file_name) continue;
-        await db.query(
-          `INSERT INTO request_documents (request_id, file_name, file_path) VALUES (?, ?, ?)`,
-          [applicationId, doc.file_name, doc.file_data]
-        );
-      }
-    }
 
     await db.query(
-      `UPDATE service_requests SET status = 'submitted', ai_summary = NULL, ai_processed_at = NULL WHERE id = ?`,
-      [applicationId]
+      `INSERT INTO notifications (user_id, message) VALUES (?, ?)`,
+      [
+        userId,
+        `APPLICATION RECEIVED - ${referenceNumber}\n\nYour ${String(rawService)} application for ${normalizedDepartment.replace(/_/g, ' ')} has been received and is pending review.`
+      ]
     );
 
-    const [userRows] = await db.query(`SELECT full_name, national_id, date_of_birth, gender FROM users WHERE id = ?`, [userId]);
-    const user = userRows[0];
+    return res.status(201).json({
+      success: true,
+      message: 'Application submitted successfully.',
+      application: rows[0] || null
+    });
+  } catch (error) {
+    console.error('CREATE APPLICATION FAILED:', error);
 
-    try {
-      const [docs] = await db.query(`SELECT file_name, file_path FROM request_documents WHERE request_id = ?`, [applicationId]);
-      const appForAI = { id: applicationId, reference_number: app.reference_number, service_type: app.service_type, department: app.department, documents: docs };
-      const citizen = { full_name: user.full_name, national_id: user.national_id, date_of_birth: user.date_of_birth, gender: user.gender };
-      const { system, user: promptUser } = buildSummaryPrompt(appForAI, citizen, { eligible: true });
-      const aiResult = await callModel({ system, user: promptUser, responseSchema: SUMMARY_SCHEMA, temperature: 0.1 });
-
-      let newStatus = 'review';
-      let notificationMsg = `Your application ${app.reference_number} is under review.`;
-
-      if (aiResult.recommendation === 'approve') { newStatus = 'approved'; notificationMsg = `Good news! Your application ${app.reference_number} has been approved.`; }
-      else if (aiResult.recommendation === 'reject') { newStatus = 'rejected'; notificationMsg = `Your application ${app.reference_number} was rejected. Reason: ${aiResult.summary}.`; }
-      else if (aiResult.recommendation === 'request_info') { newStatus = 'review'; notificationMsg = `Action required: Please upload missing documents for ${app.reference_number}.`; }
-
-      await db.query(
-        `UPDATE service_requests SET status = ?, ai_summary = ?, ai_recommendation = ?, ai_risk_score = ?, ai_processed_at = NOW() WHERE id = ?`,
-        [newStatus, aiResult.summary, aiResult.recommendation, aiResult.risk_score, applicationId]
-      );
-
-      if (newStatus === 'approved') {
-        if (app.service_type === 'National ID Registration') {
-          if (!user.national_id || String(user.national_id).length !== 13) {
-            if (user.date_of_birth) {
-              const d = new Date(user.date_of_birth);
-              const yy = String(d.getFullYear()).slice(-2);
-              const mm = String(d.getMonth() + 1).padStart(2, '0');
-              const dd = String(d.getDate()).padStart(2, '0');
-              const genderDigit = String(user.gender).toLowerCase() === 'male' ? '5' : '6';
-              const seq = String(Math.floor(Math.random() * 900000) + 100000).padStart(6, '0');
-              const newID = `${yy}${mm}${dd}${seq}${genderDigit}`;
-
-              await db.query(`UPDATE users SET national_id = ? WHERE id = ?`, [newID, userId]);
-              notificationMsg += ` Your National ID is ${newID}.`;
-            }
-          }
-        } else if (app.service_type === 'Birth Certificate') {
-          const bcNumber = `BC-${new Date().getFullYear()}-${Math.floor(Math.random() * 900000) + 100000}`;
-          await db.query(`UPDATE users SET birth_certificate_number = ? WHERE id = ?`, [bcNumber, userId]);
-          notificationMsg += ` Your Birth Certificate Number is ${bcNumber}.`;
-        } else {
-          const prefixMap = {
-            'Passport Application': 'PP', 'Passport Renewal': 'PPR',
-            "Driver's Licence": 'DL', 'Vehicle Registration': 'VR',
-            'Tax Filing': 'TX', 'Pension Application': 'PN',
-            'Police Clearance': 'PC'
-          };
-          const docPrefix = prefixMap[app.service_type] || 'DOC';
-          const docNumber = `${docPrefix}-${new Date().getFullYear()}-${Math.floor(Math.random() * 900000) + 100000}`;
-
-          await db.query(`UPDATE users SET other_document_number = ?, other_document_type = ? WHERE id = ?`, [docNumber, app.service_type, userId]);
-          notificationMsg += ` Your ${app.service_type} document number is ${docNumber}.`;
-        }
-      }
-
-      await db.query('INSERT INTO notifications (user_id, message) VALUES (?, ?)', [userId, notificationMsg]);
-      return res.json({ message: 'Application processed successfully.' });
-
-    } catch (aiErr) {
-      console.error('AI Re-processing Failed:', aiErr.message);
-      return res.json({ message: 'Documents uploaded. Your application is under review.' });
-    }
-
-  } catch (err) {
-    console.error('updateApplicationDocuments error:', err);
-    return res.status(500).json({ message: 'Error updating application' });
+    return res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'production'
+          ? 'Failed to submit application.'
+          : error.message
+    });
   }
 };
 
-exports.getNotifications = async (req, res) => {
-  try {
-    const [rows] = await db.query(
-      `SELECT id, message, is_read, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 10`,
-      [req.user.id]
-    );
-    return res.json(rows);
-  } catch (err) { return res.status(500).json({ message: 'Error fetching notifications' }); }
-};
-
-exports.deleteNotification = async (req, res) => {
-  try {
-    await db.query('DELETE FROM notifications WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-    return res.json({ success: true, message: 'Notification deleted' });
-  } catch (err) { return res.status(500).json({ message: 'Error deleting notification' }); }
-};
-
-exports.getOfficerQueue = async (req, res) => {
-  const role = String(req.user.role || '').toLowerCase();
-  try {
-    let query = `
-      SELECT sr.*, u.full_name AS citizen_name, u.national_id AS citizen_id,
-             u.email AS citizen_email, u.phone AS citizen_phone, u.picture_data AS citizen_picture,
-             u.date_of_birth, u.is_government_employee
-      FROM service_requests sr
-      JOIN users u ON u.id = sr.user_id
-    `;
-    const params = [];
-    if (role !== 'home_affairs') { query += ' WHERE sr.department = ?'; params.push(role); }
-    query += ' ORDER BY sr.created_at DESC';
-
-    const [rows] = await db.query(query, params);
-    const rowsWithDocs = await Promise.all(rows.map(async (app) => {
-      const [docs] = await db.query(`SELECT id, file_name, file_path, uploaded_at FROM request_documents WHERE request_id = ?`, [app.id]);
-      return { ...app, documents: docs };
-    }));
-    return res.json(rowsWithDocs);
-  } catch (err) { return res.status(500).json({ message: 'Error fetching queue' }); }
-};
+/* ------------------------------------------------------------------
+   CITIZEN: GET MY APPLICATIONS
+------------------------------------------------------------------ */
 
 exports.getMyApplications = async (req, res) => {
   try {
-    const [rows] = await db.query(
-      `SELECT sr.*, (SELECT COUNT(*) FROM request_documents rd WHERE rd.request_id = sr.id) AS document_count
-       FROM service_requests sr WHERE sr.user_id = ? ORDER BY sr.created_at DESC`,
-      [req.user.id]
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required.'
+      });
+    }
+
+    const [applications] = await db.query(
+      `SELECT
+         sr.*,
+         (SELECT COUNT(*) FROM request_documents rd
+          WHERE rd.request_id = sr.id) AS doc_count
+       FROM service_requests sr
+       WHERE sr.user_id = ?
+       ORDER BY sr.created_at DESC`,
+      [userId]
     );
-    return res.json(rows);
-  } catch (err) { return res.status(500).json({ message: 'Error fetching applications' }); }
+
+    for (const app of applications) {
+      app.ai_findings = safeParseJSON(app.ai_findings, null);
+    }
+
+    return res.status(200).json({
+      success: true,
+      count: applications.length,
+      applications
+    });
+  } catch (error) {
+    console.error('GET MY APPLICATIONS FAILED:', error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'production'
+          ? 'Failed to load your applications.'
+          : error.message
+    });
+  }
 };
 
-exports.trackByReference = async (req, res) => {
+/* ------------------------------------------------------------------
+   CITIZEN: NOTIFICATIONS
+------------------------------------------------------------------ */
+
+exports.getNotifications = async (req, res) => {
   try {
-    const [rows] = await db.query(
-      `SELECT reference_number, service_type, department, status, notes, created_at, updated_at, ai_summary
-       FROM service_requests WHERE reference_number = ?`,
-      [req.params.reference]
+    const userId = req.user?.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required.'
+      });
+    }
+
+    const [notifications] = await db.query(
+      `SELECT id, user_id, message, created_at
+       FROM notifications
+       WHERE user_id = ?
+       ORDER BY created_at DESC
+       LIMIT 100`,
+      [userId]
     );
-    if (rows.length === 0) return res.status(404).json({ error: 'NOT_FOUND', message: 'No application found.' });
-    return res.json(rows[0]);
-  } catch (err) { return res.status(500).json({ message: 'Error fetching application' }); }
+
+    return res.status(200).json({
+      success: true,
+      count: notifications.length,
+      notifications
+    });
+  } catch (error) {
+    console.error('GET NOTIFICATIONS FAILED:', error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'production'
+          ? 'Failed to load notifications.'
+          : error.message
+    });
+  }
 };
+
+/* ------------------------------------------------------------------
+   CITIZEN: UPLOAD ADDITIONAL DOCUMENTS
+------------------------------------------------------------------ */
+
+exports.updateApplicationDocuments = async (req, res) => {
+  const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+
+  try {
+    const userId = req.user?.id;
+    const applicationId = req.params.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required.'
+      });
+    }
+
+    if (!/^\d+$/.test(String(applicationId))) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid application ID.'
+      });
+    }
+
+    if (uploadedFiles.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Please select at least one document to upload.'
+      });
+    }
+
+    const [existing] = await db.query(
+      `SELECT id, user_id, status, reference_number
+       FROM service_requests
+       WHERE id = ?
+       LIMIT 1`,
+      [applicationId]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Application not found.'
+      });
+    }
+
+    if (Number(existing[0].user_id) !== Number(userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not own this application.'
+      });
+    }
+
+    const uploadRoot = path.resolve(
+      __dirname,
+      '..',
+      'uploads',
+      'requests'
+    );
+
+    const uploaded = [];
+
+    for (const file of uploadedFiles) {
+      const storedPath = path
+        .relative(path.resolve(__dirname, '..'), file.path)
+        .split(path.sep)
+        .join('/');
+
+      const documentType = 'other';
+
+      const [insert] = await db.query(
+        `INSERT INTO request_documents
+           (request_id, file_name, document_type, file_path, uploaded_at)
+         VALUES (?, ?, ?, ?, NOW())`,
+        [
+          applicationId,
+          file.originalname,
+          documentType,
+          storedPath
+        ]
+      );
+
+      uploaded.push({
+        id: insert.insertId,
+        file_name: file.originalname,
+        document_type: documentType,
+        file_path: storedPath
+      });
+    }
+
+    await db.query(
+      `UPDATE service_requests
+       SET status = 'pending',
+           ai_processed_at = NULL,
+           ai_recommendation = NULL
+       WHERE id = ?`,
+      [applicationId]
+    );
+
+    await db.query(
+      `INSERT INTO notifications (user_id, message) VALUES (?, ?)`,
+      [
+        userId,
+        `DOCUMENTS RECEIVED - ${existing[0].reference_number || `application ${applicationId}`}\n\nYour additional document(s) have been received and the application has been returned to the review queue.`
+      ]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Documents uploaded successfully.',
+      uploaded
+    });
+  } catch (error) {
+    console.error('UPDATE APPLICATION DOCUMENTS FAILED:', error);
+
+    // Remove files from disk if the database operation failed.
+    for (const file of uploadedFiles) {
+      try {
+        if (file.path && fs.existsSync(file.path)) {
+          fs.unlinkSync(file.path);
+        }
+      } catch (cleanupError) {
+        console.error('UPLOADED FILE CLEANUP FAILED:', cleanupError.message);
+      }
+    }
+
+    return res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'production'
+          ? 'Failed to upload documents.'
+          : error.message
+    });
+  }
+};
+
+/* ------------------------------------------------------------------
+   CITIZEN: APPLICATION DETAIL
+------------------------------------------------------------------ */
 
 exports.getApplicationById = async (req, res) => {
   try {
-    const [rows] = await db.query('SELECT * FROM service_requests WHERE id = ? AND user_id = ?', [req.params.id, req.user.id]);
-    if (rows.length === 0) return res.status(404).json({ message: 'Application not found' });
-    const [docs] = await db.query(`SELECT id, file_name, file_path, uploaded_at FROM request_documents WHERE request_id = ?`, [req.params.id]);
-    return res.json({ ...rows[0], documents: docs });
-  } catch (err) { return res.status(500).json({ message: 'Error fetching application' }); }
+    const userId = req.user?.id;
+    const applicationId = req.params.id;
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        error: 'Authentication required.'
+      });
+    }
+
+    const [rows] = await db.query(
+      `SELECT
+         sr.*,
+         u.full_name,
+         u.national_id,
+         u.email,
+         u.birth_certificate_number,
+         u.date_of_birth,
+         u.gender
+       FROM service_requests sr
+       INNER JOIN users u ON u.id = sr.user_id
+       WHERE sr.id = ?
+       LIMIT 1`,
+      [applicationId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Application not found.'
+      });
+    }
+
+    const application = rows[0];
+
+    if (Number(application.user_id) !== Number(userId)) {
+      return res.status(403).json({
+        success: false,
+        error: 'You do not own this application.'
+      });
+    }
+
+    const [documents] = await db.query(
+      `SELECT id, file_name, document_type, uploaded_at
+       FROM request_documents
+       WHERE request_id = ?
+       ORDER BY uploaded_at DESC`,
+      [applicationId]
+    );
+
+    application.documents = documents;
+    application.doc_count = documents.length;
+    application.ai_findings = safeParseJSON(
+      application.ai_findings,
+      null
+    );
+
+    return res.status(200).json({
+      success: true,
+      application
+    });
+  } catch (error) {
+    console.error('GET APPLICATION BY ID FAILED:', error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'production'
+          ? 'Failed to load application.'
+          : error.message
+    });
+  }
 };
+
+/* ------------------------------------------------------------------
+   PUBLIC TRACKING
+------------------------------------------------------------------ */
+
+exports.trackByReference = async (req, res) => {
+  try {
+    const reference = String(req.params.reference || '').trim();
+
+    if (!reference) {
+      return res.status(400).json({
+        success: false,
+        error: 'Reference number is required.'
+      });
+    }
+
+    const [rows] = await db.query(
+      `SELECT
+         sr.id,
+         sr.reference_number,
+         sr.department,
+         sr.service_type,
+         sr.status,
+         sr.ai_summary,
+         sr.ai_recommendation,
+         sr.created_at,
+         sr.updated_at,
+         u.full_name
+       FROM service_requests sr
+       INNER JOIN users u ON u.id = sr.user_id
+       WHERE sr.reference_number = ?
+       LIMIT 1`,
+      [reference]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'No application found for that reference.'
+      });
+    }
+
+    const application = rows[0];
+
+    const [documents] = await db.query(
+      `SELECT id, file_name, document_type, uploaded_at
+       FROM request_documents
+       WHERE request_id = ?
+       ORDER BY uploaded_at DESC`,
+      [application.id]
+    );
+
+    application.documents = documents;
+    application.doc_count = documents.length;
+
+    return res.status(200).json({
+      success: true,
+      application
+    });
+  } catch (error) {
+    console.error('TRACK BY REFERENCE FAILED:', error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'production'
+          ? 'Failed to track application.'
+          : error.message
+    });
+  }
+};
+
+/* ------------------------------------------------------------------
+   OFFICER: QUEUE
+------------------------------------------------------------------ */
+
+exports.getOfficerQueue = async (req, res) => {
+  try {
+    const role = String(req.user?.role || '').toLowerCase();
+    const isAdmin = role === 'admin';
+
+    let query = `
+      SELECT
+        sr.*,
+        u.full_name,
+        u.national_id,
+        u.email,
+        u.status AS citizen_status,
+        u.birth_certificate_number,
+        u.date_of_birth,
+        u.gender,
+        (SELECT COUNT(*) FROM request_documents rd
+         WHERE rd.request_id = sr.id) AS doc_count
+      FROM service_requests sr
+      INNER JOIN users u ON u.id = sr.user_id
+    `;
+
+    const params = [];
+
+    if (!isAdmin) {
+      query += ` WHERE LOWER(sr.department) = ? `;
+      params.push(role);
+    }
+
+    query += `
+      ORDER BY
+        FIELD(sr.status, 'review', 'pending', 'approved', 'rejected', 'completed'),
+        sr.created_at DESC
+    `;
+
+    const [applications] = await db.query(query, params);
+
+    for (const app of applications) {
+      app.ai_findings = safeParseJSON(app.ai_findings, null);
+    }
+
+    return res.status(200).json({
+      success: true,
+      count: applications.length,
+      applications
+    });
+  } catch (error) {
+    console.error('GET OFFICER QUEUE FAILED:', error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'production'
+          ? 'Failed to load officer queue.'
+          : error.message
+    });
+  }
+};
+
+/* ------------------------------------------------------------------
+   OFFICER: APPLICATION DETAIL
+------------------------------------------------------------------ */
 
 exports.getOfficerApplicationDetail = async (req, res) => {
-  const role = String(req.user.role || '').toLowerCase();
   try {
+    const applicationId = req.params.id;
+    const role = String(req.user?.role || '').toLowerCase();
+    const isAdmin = role === 'admin';
+
     const [rows] = await db.query(
-      `SELECT sr.*, u.full_name AS citizen_name, u.national_id AS citizen_id, u.email AS citizen_email, u.phone AS citizen_phone, u.picture_data AS citizen_picture, u.date_of_birth, u.gender
-       FROM service_requests sr JOIN users u ON u.id = sr.user_id WHERE sr.id = ?`,
-      [req.params.id]
+      `SELECT
+         sr.*,
+         u.full_name,
+         u.national_id,
+         u.email,
+         u.status AS citizen_status,
+         u.birth_certificate_number,
+         u.date_of_birth,
+         u.gender
+       FROM service_requests sr
+       INNER JOIN users u ON u.id = sr.user_id
+       WHERE sr.id = ?
+       LIMIT 1`,
+      [applicationId]
     );
-    if (rows.length === 0) return res.status(404).json({ message: 'Application not found' });
-    if (role !== 'home_affairs' && rows[0].department !== role) return res.status(403).json({ message: 'Access denied' });
-    const [docs] = await db.query(`SELECT id, file_name, file_path, uploaded_at FROM request_documents WHERE request_id = ?`, [req.params.id]);
-    return res.json({ ...rows[0], documents: docs });
-  } catch (err) { return res.status(500).json({ message: 'Error fetching application' }); }
+
+    if (rows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Application not found.'
+      });
+    }
+
+    const application = rows[0];
+
+    if (
+      !isAdmin &&
+      String(application.department).toLowerCase() !== role
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: 'This application is outside your department.'
+      });
+    }
+
+    const [documents] = await db.query(
+      `SELECT id, file_name, document_type, uploaded_at
+       FROM request_documents
+       WHERE request_id = ?
+       ORDER BY uploaded_at DESC`,
+      [applicationId]
+    );
+
+    application.documents = documents;
+    application.doc_count = documents.length;
+    application.ai_findings = safeParseJSON(
+      application.ai_findings,
+      null
+    );
+
+    return res.status(200).json({
+      success: true,
+      application
+    });
+  } catch (error) {
+    console.error('GET OFFICER APPLICATION DETAIL FAILED:', error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'production'
+          ? 'Failed to load application.'
+          : error.message
+    });
+  }
 };
 
+/* ------------------------------------------------------------------
+   OFFICER: UPDATE APPLICATION STATUS
+------------------------------------------------------------------ */
+
 exports.updateApplicationStatus = async (req, res) => {
-  const { status, rejection_reason } = req.body;
-  const role = String(req.user.role || '').toLowerCase();
-  const validStatuses = ['submitted', 'pending', 'review', 'ready', 'completed', 'rejected', 'cancelled'];
-  if (!validStatuses.includes(status)) return res.status(400).json({ message: `Invalid status.` });
-
   try {
-    const [rows] = await db.query('SELECT * FROM service_requests WHERE id = ?', [req.params.id]);
-    if (rows.length === 0) return res.status(404).json({ message: 'Application not found' });
-    if (role !== 'home_affairs' && rows[0].department !== role) return res.status(403).json({ message: 'Access denied' });
+    const applicationId = req.params.id;
+    const role = String(req.user?.role || '').toLowerCase();
+    const isAdmin = role === 'admin';
 
-    await db.query(
-      `UPDATE service_requests SET status = ?, notes = CONCAT(COALESCE(notes, ''), ?) WHERE id = ?`,
-      [status, rejection_reason ? `\nOfficer: ${rejection_reason}` : '', req.params.id]
+    const newStatusRaw = String(
+      req.body?.status || req.body?.new_status || ''
+    ).toLowerCase().trim();
+
+    if (!VALID_STATUSES.has(newStatusRaw)) {
+      return res.status(400).json({
+        success: false,
+        error: `Invalid status. Allowed: ${Array.from(VALID_STATUSES).join(', ')}.`
+      });
+    }
+
+    const note = String(
+      req.body?.note || req.body?.comment || ''
+    ).trim();
+
+    const [existing] = await db.query(
+      `SELECT id, user_id, department, reference_number, status
+       FROM service_requests
+       WHERE id = ?
+       LIMIT 1`,
+      [applicationId]
     );
 
-    if (status === 'rejected') {
-      await db.query('INSERT INTO notifications (user_id, message) VALUES (?, ?)', [rows[0].user_id, `Your application ${rows[0].reference_number} was rejected. Reason: ${rejection_reason || 'see details'}.`]);
-    } else {
-      await db.query('INSERT INTO notifications (user_id, message) VALUES (?, ?)', [rows[0].user_id, `Your application ${rows[0].reference_number} status is now: ${status}.`]);
+    if (existing.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'Application not found.'
+      });
     }
-    return res.json({ message: 'Status updated' });
-  } catch (err) { return res.status(500).json({ message: 'Error updating status: ' + err.message }); }
+
+    const application = existing[0];
+
+    if (
+      !isAdmin &&
+      String(application.department).toLowerCase() !== role
+    ) {
+      return res.status(403).json({
+        success: false,
+        error: 'This application is outside your department.'
+      });
+    }
+
+    await db.query(
+      `UPDATE service_requests
+       SET status = ?, updated_at = NOW()
+       WHERE id = ?`,
+      [newStatusRaw, applicationId]
+    );
+
+    const message = note
+      ? `APPLICATION UPDATE - ${application.reference_number || `application ${applicationId}`}\n\nNew status: ${newStatusRaw}\n\n${note}`
+      : `APPLICATION UPDATE - ${application.reference_number || `application ${applicationId}`}\n\nYour application status has been updated to: ${newStatusRaw}.`;
+
+    await db.query(
+      `INSERT INTO notifications (user_id, message) VALUES (?, ?)`,
+      [application.user_id, message]
+    );
+
+    const [updatedRows] = await db.query(
+      `SELECT * FROM service_requests WHERE id = ? LIMIT 1`,
+      [applicationId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: 'Application status updated.',
+      application: updatedRows[0] || null
+    });
+  } catch (error) {
+    console.error('UPDATE APPLICATION STATUS FAILED:', error);
+
+    return res.status(500).json({
+      success: false,
+      error:
+        process.env.NODE_ENV === 'production'
+          ? 'Failed to update application status.'
+          : error.message
+    });
+  }
 };

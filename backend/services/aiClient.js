@@ -2,11 +2,12 @@
 require('dotenv').config();
 
 const AI_API_KEY = process.env.AI_API_KEY;
+
 const AI_BASE_URL = (
-  process.env.AI_BASE_URL || 'https://api.openai.com/v1'
+  process.env.AI_BASE_URL || 'https://api.groq.com/openai/v1'
 ).replace(/\/+$/, '');
 
-const AI_MODEL = process.env.AI_MODEL || 'gpt-4o-mini';
+const AI_MODEL = process.env.AI_MODEL || 'openai/gpt-oss-120b';
 const AI_TIMEOUT_MS = 25000;
 
 async function callModel({
@@ -20,29 +21,47 @@ async function callModel({
   }
 
   const controller = new AbortController();
+
   const timeout = setTimeout(
     () => controller.abort(),
     AI_TIMEOUT_MS
   );
 
   try {
+    // Explicitly require JSON in the messages.
+    const systemMessage = `
+${system || ''}
+
+IMPORTANT OUTPUT REQUIREMENT:
+Return ONLY one valid JSON object.
+Your response MUST be valid JSON.
+Do not include Markdown, code fences, or explanations outside the JSON object.
+${responseSchema ? `Follow this response structure: ${JSON.stringify(responseSchema)}` : ''}
+`;
+
+    const userMessage = `
+${user || ''}
+
+Remember: Return the result as a valid JSON object only.
+`;
+
     const body = {
       model: AI_MODEL,
       temperature,
       messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
+        {
+          role: 'system',
+          content: systemMessage,
+        },
+        {
+          role: 'user',
+          content: userMessage,
+        },
       ],
+      response_format: {
+        type: 'json_object',
+      },
     };
-
-    if (responseSchema) {
-      body.response_format = {
-        type: 'json_schema',
-        json_schema: responseSchema,
-      };
-    } else {
-      body.response_format = { type: 'json_object' };
-    }
 
     const response = await fetch(
       `${AI_BASE_URL}/chat/completions`,
@@ -59,8 +78,9 @@ async function callModel({
 
     if (!response.ok) {
       const message = await response.text();
+
       throw new Error(
-        `AI request failed (${response.status}): ${message.slice(0, 300)}`
+        `AI request failed (${response.status}): ${message.slice(0, 500)}`
       );
     }
 
@@ -79,15 +99,19 @@ async function callModel({
 
     try {
       return JSON.parse(content);
-    } catch {
+    } catch (error) {
+      console.error('Invalid AI JSON response:', content);
+
       throw new Error('AI returned invalid JSON');
     }
+
   } catch (error) {
     if (error.name === 'AbortError') {
       throw new Error('AI request timed out');
     }
 
     throw error;
+
   } finally {
     clearTimeout(timeout);
   }

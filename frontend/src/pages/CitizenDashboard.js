@@ -6,7 +6,18 @@ import API from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 
 const Icon = ({ name, size = 19 }) => {
-  const common = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true };
+  const common = {
+    width: size,
+    height: size,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': true
+  };
+
   const paths = {
     search: <><circle cx="10.8" cy="10.8" r="6.5" /><path d="m16 16 4.5 4.5" /></>,
     arrow: <><path d="M5 12h14" /><path d="m13 6 6 6-6 6" /></>,
@@ -18,7 +29,23 @@ const Icon = ({ name, size = 19 }) => {
     bell: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>,
     trash: <><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /></>,
   };
+
   return <svg {...common}>{paths[name]}</svg>;
+};
+
+// Handles API responses that return arrays directly or inside objects.
+const getArrayFromResponse = (data, keys = []) => {
+  if (Array.isArray(data)) return data;
+
+  if (!data || typeof data !== 'object') return [];
+
+  for (const key of keys) {
+    if (Array.isArray(data[key])) {
+      return data[key];
+    }
+  }
+
+  return [];
 };
 
 const styles = `
@@ -42,10 +69,10 @@ const styles = `
   .citizen-page .id-card .id-number { font-size:22px; font-weight:900; letter-spacing:2px; margin-bottom:4px; }
   .citizen-page .id-card .id-bc { font-size:12px; opacity:0.8; }
   .citizen-page .id-card button { display:flex; align-items:center; gap:8px; padding:12px 18px; background:#fff; color:#00209F; border:none; border-radius:8px; font-weight:800; font-size:13px; cursor:pointer; }
-  
+
   .citizen-page .notifications-panel { padding:18px 20px; background:#fff; border:1px solid var(--border); border-radius:15px; box-shadow:0 10px 26px rgba(20,35,60,.06); margin-bottom:25px; }
   .citizen-page .notifications-panel h2 { font-size:16px; margin-bottom:14px; color:#000; display:flex; align-items:center; gap:8px; }
-  
+
   .citizen-page .notification-item { position:relative; padding:12px 40px 12px 14px; border-left:4px solid #00209F; background:#f7f9fc; border-radius:8px; margin-bottom:10px; font-size:13px; color:#172235; line-height:1.5; }
   .citizen-page .notification-item:last-child { margin-bottom:0; }
   .citizen-page .notification-meta { font-size:10px; color:#718096; margin-top:6px; }
@@ -75,127 +102,335 @@ const styles = `
   .citizen-page .activity-meta { margin-top:3px; color:var(--muted); font-size:10px; }
   .citizen-page .empty { padding:33px 15px; color:var(--muted); text-align:center; font-size:12px; }
   .citizen-main { min-width:0; width:calc(100% - 240px); min-height:100vh; margin-left:240px; padding:32px 40px; }
-  @media (max-width:900px) { .citizen-page .service-grid { grid-template-columns:repeat(2,1fr); } .citizen-page .overview-grid { grid-template-columns:1fr; } }
-  @media (max-width:600px) { .citizen-main { width:100%; margin-left:0; padding:22px 16px 32px; } .citizen-page .hero { flex-direction:column; padding:24px 20px; } .citizen-page .profile-card { flex-direction:column; align-items:flex-start; } .citizen-page .service-grid { grid-template-columns:1fr; } .citizen-page .id-card { flex-direction:column; align-items:flex-start; text-align:left; } }
+
+  @media (max-width:900px) {
+    .citizen-page .service-grid { grid-template-columns:repeat(2,1fr); }
+    .citizen-page .overview-grid { grid-template-columns:1fr; }
+  }
+
+  @media (max-width:600px) {
+    .citizen-main { width:100%; margin-left:0; padding:22px 16px 32px; }
+    .citizen-page .hero { flex-direction:column; padding:24px 20px; }
+    .citizen-page .profile-card { flex-direction:column; align-items:flex-start; }
+    .citizen-page .service-grid { grid-template-columns:1fr; }
+    .citizen-page .id-card { flex-direction:column; align-items:flex-start; text-align:left; }
+  }
 `;
 
 const CitizenDashboard = () => {
   const [applications, setApplications] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [profile, setProfile] = useState(null);
+
   const navigate = useNavigate();
   const { user } = useAuth();
 
   useEffect(() => {
-    API.get('/citizen/profile').then((response) => setProfile(response.data)).catch(() => {});
-    API.get('/applications/my').then((response) => setApplications(Array.isArray(response.data) ? response.data : [])).catch(() => {});
-    API.get('/applications/notifications').then((response) => setNotifications(Array.isArray(response.data) ? response.data : [])).catch(() => {});
+    let mounted = true;
+
+    const loadDashboard = async () => {
+      try {
+        const [profileResponse, applicationsResponse, notificationsResponse] =
+          await Promise.allSettled([
+            API.get('/citizen/profile'),
+            API.get('/applications/my'),
+            API.get('/applications/notifications')
+          ]);
+
+        if (!mounted) return;
+
+        if (profileResponse.status === 'fulfilled') {
+          const data = profileResponse.value.data;
+          setProfile(data?.profile || data?.user || data || null);
+        } else {
+          console.error('Could not load citizen profile:', profileResponse.reason);
+        }
+
+        if (applicationsResponse.status === 'fulfilled') {
+          const data = applicationsResponse.value.data;
+
+          const applicationList = getArrayFromResponse(data, [
+            'applications',
+            'data',
+            'items',
+            'results'
+          ]);
+
+          setApplications(applicationList);
+        } else {
+          console.error('Could not load applications:', applicationsResponse.reason);
+          setApplications([]);
+        }
+
+        if (notificationsResponse.status === 'fulfilled') {
+          const data = notificationsResponse.value.data;
+
+          const notificationList = getArrayFromResponse(data, [
+            'notifications',
+            'data',
+            'items',
+            'results'
+          ]);
+
+          setNotifications(notificationList);
+        } else {
+          console.error('Could not load notifications:', notificationsResponse.reason);
+          setNotifications([]);
+        }
+      } catch (error) {
+        console.error('Dashboard loading error:', error);
+      }
+    };
+
+    loadDashboard();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  const handleDeleteNotification = (id) => {
-    // Optimistically remove from UI
+  const handleDeleteNotification = async (id) => {
+    const previousNotifications = notifications;
+
     setNotifications((prev) => prev.filter((n) => n.id !== id));
-    // Send request to backend
-    API.delete(`/applications/notifications/${id}`).catch((err) => {
-      console.error('Failed to delete notification:', err);
-    });
+
+    try {
+      await API.delete(`/applications/notifications/${id}`);
+    } catch (error) {
+      console.error('Failed to delete notification:', error);
+
+      // Restore the notification if the backend delete request fails.
+      setNotifications(previousNotifications);
+      alert(
+        error.response?.data?.error ||
+        error.response?.data?.message ||
+        'Could not delete this notification.'
+      );
+    }
   };
 
-  const visible = useMemo(() => applications.slice(0, 5), [applications]);
-  const completed = applications.filter((a) => ['completed', 'approved'].includes(a.status)).length;
-  const active = applications.filter((a) => ['submitted', 'pending', 'review', 'ready'].includes(a.status)).length;
-  const displayName = profile?.full_name || user?.full_name || 'Citizen';
+  const visible = useMemo(
+    () => applications.slice(0, 5),
+    [applications]
+  );
+
+  const completed = applications.filter((a) =>
+    ['completed', 'approved'].includes(String(a.status || '').toLowerCase())
+  ).length;
+
+  const active = applications.filter((a) =>
+    ['submitted', 'pending', 'review', 'ready', 'in_review'].includes(
+      String(a.status || '').toLowerCase()
+    )
+  ).length;
+
+  const displayName =
+    profile?.full_name ||
+    user?.full_name ||
+    'Citizen';
+
   const initial = displayName.charAt(0).toUpperCase();
-  const picture = profile?.picture_data || user?.picture_data;
-  
-  const nationalId = profile?.national_id || user?.national_id;
-  const birthCertNumber = profile?.birth_certificate_number || user?.birth_certificate_number;
+
+  const picture =
+    profile?.picture_data ||
+    user?.picture_data;
+
+  const nationalId =
+    profile?.national_id ||
+    user?.national_id;
+
+  const birthCertNumber =
+    profile?.birth_certificate_number ||
+    user?.birth_certificate_number;
+
   const otherDocNumber = profile?.other_document_number;
   const otherDocType = profile?.other_document_type;
   const userId = profile?.id || user?.id;
 
   const handleDownloadCertificate = () => {
+    if (!userId) {
+      alert('Your user ID could not be found.');
+      return;
+    }
+
     const token = localStorage.getItem('token');
-    fetch(`http://localhost:5000/api/documents/birth-certificate/${userId}`, { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(res => { if (!res.ok) throw new Error('Failed to download'); return res.blob(); })
-      .then(blob => {
+
+    fetch(
+      `http://localhost:5000/api/documents/birth-certificate/${userId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      }
+    )
+      .then((res) => {
+        if (!res.ok) {
+          throw new Error('Failed to download certificate.');
+        }
+
+        return res.blob();
+      })
+      .then((blob) => {
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
+
         a.href = url;
         a.download = `BirthCertificate_${birthCertNumber}.pdf`;
+
         document.body.appendChild(a);
         a.click();
         a.remove();
+
+        window.URL.revokeObjectURL(url);
       })
-      .catch(err => alert('Error downloading certificate: ' + err.message));
+      .catch((err) => {
+        alert('Error downloading certificate: ' + err.message);
+      });
   };
 
   return (
     <div style={layoutStyles.layout}>
       <Sidebar />
+
       <main className="citizen-main">
         <style>{styles}</style>
+
         <div className="citizen-page">
+
+          {/* Welcome banner */}
           <header className="hero">
             <div>
-              <div className="eyebrow"><span /> Citizen services portal</div>
-              <h1>Welcome back, {displayName.split(' ')[0]}</h1>
-              <p>Apply for services, upload documents, and track every application in one place.</p>
+              <div className="eyebrow">
+                <span />
+                Citizen services portal
+              </div>
+
+              <h1>
+                Welcome back, {displayName.split(' ')[0]}
+              </h1>
+
+              <p>
+                Apply for services, upload documents, and track every application in one place.
+              </p>
             </div>
           </header>
 
+          {/* Citizen profile */}
           <section className="profile-card">
             <div className="profile-left">
-              <div className="avatar">{picture ? <img src={picture} alt="Profile" style={{width:'100%',height:'100%',objectFit:'cover'}}/> : initial}</div>
+              <div className="avatar">
+                {picture ? (
+                  <img
+                    src={picture}
+                    alt="Profile"
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover'
+                    }}
+                  />
+                ) : (
+                  initial
+                )}
+              </div>
+
               <div>
                 <div className="profile-name">{displayName}</div>
-                <div className="profile-label">{nationalId ? `National ID · ${nationalId}` : 'Citizen account'}</div>
+
+                <div className="profile-label">
+                  {nationalId
+                    ? `National ID · ${nationalId}`
+                    : 'Citizen account'}
+                </div>
               </div>
             </div>
-            <div className="profile-status"><i /> Active</div>
+
+            <div className="profile-status">
+              <i />
+              Active
+            </div>
           </section>
 
+          {/* Official documents */}
           {(nationalId || birthCertNumber || otherDocNumber) && (
             <section className="id-card">
               <div>
                 <h3>Official Government Documents</h3>
-                {nationalId && <div className="id-number">ID: {nationalId}</div>}
-                {birthCertNumber && <div className="id-bc">Birth Certificate: {birthCertNumber}</div>}
+
+                {nationalId && (
+                  <div className="id-number">
+                    ID: {nationalId}
+                  </div>
+                )}
+
+                {birthCertNumber && (
+                  <div className="id-bc">
+                    Birth Certificate: {birthCertNumber}
+                  </div>
+                )}
+
                 {otherDocNumber && (
-                  <div className="id-bc" style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                  <div
+                    className="id-bc"
+                    style={{
+                      marginTop: 8,
+                      paddingTop: 8,
+                      borderTop: '1px solid rgba(255,255,255,0.2)'
+                    }}
+                  >
                     {otherDocType || 'Document'}: {otherDocNumber}
                   </div>
                 )}
               </div>
+
               {birthCertNumber && (
                 <button onClick={handleDownloadCertificate}>
-                  <Icon name="download" size={16} /> Download Certificate
+                  <Icon name="download" size={16} />
+                  Download Certificate
                 </button>
               )}
             </section>
           )}
 
-          {notifications.length > 0 && (
-            <section className="notifications-panel">
-              <h2><Icon name="bell" size={18} /> Recent Notifications</h2>
-              {notifications.slice(0, 4).map((n) => (
-                <div key={n.id} className="notification-item">
-                  <button 
-                    className="delete-notif" 
+          {/* Notifications */}
+          <section className="notifications-panel">
+            <h2>
+              <Icon name="bell" size={18} />
+              Recent Notifications
+            </h2>
+
+            {notifications.length === 0 ? (
+              <div className="empty">
+                No notifications available at the moment.
+              </div>
+            ) : (
+              notifications.slice(0, 4).map((n) => (
+                <div
+                  key={n.id}
+                  className="notification-item"
+                >
+                  <button
+                    className="delete-notif"
                     onClick={() => handleDeleteNotification(n.id)}
                     aria-label="Dismiss notification"
+                    title="Dismiss notification"
                   >
                     <Icon name="trash" size={14} />
                   </button>
-                  {n.message}
+
+                  {n.message || n.title || 'You have a new notification.'}
+
                   <div className="notification-meta">
-                    {new Date(n.created_at).toLocaleString()}
+                    {n.created_at
+                      ? new Date(n.created_at).toLocaleString()
+                      : ''}
                   </div>
                 </div>
-              ))}
-            </section>
-          )}
+              ))
+            )}
+          </section>
 
+          {/* Quick actions */}
           <div className="section-heading">
             <div>
               <h2>Quick actions</h2>
@@ -204,27 +439,62 @@ const CitizenDashboard = () => {
           </div>
 
           <section className="service-grid" aria-label="Quick actions">
-            <button className="service-card" onClick={() => navigate('/apply')}>
-              <span className="service-icon"><Icon name="plus" size={18} /></span>
-              <span><h3>Apply for a service</h3><p>Submit a new application</p></span>
+            <button
+              className="service-card"
+              onClick={() => navigate('/apply')}
+            >
+              <span className="service-icon">
+                <Icon name="plus" size={18} />
+              </span>
+
+              <span>
+                <h3>Apply for a service</h3>
+                <p>Submit a new application</p>
+              </span>
             </button>
-            <button className="service-card" onClick={() => navigate('/track')}>
-              <span className="service-icon"><Icon name="search" size={18} /></span>
-              <span><h3>Track applications</h3><p>See status of everything submitted</p></span>
+
+            <button
+              className="service-card"
+              onClick={() => navigate('/track')}
+            >
+              <span className="service-icon">
+                <Icon name="search" size={18} />
+              </span>
+
+              <span>
+                <h3>Track applications</h3>
+                <p>See status of everything submitted</p>
+              </span>
             </button>
-            <button className="service-card" onClick={() => navigate('/profile')}>
-              <span className="service-icon"><Icon name="user" size={18} /></span>
-              <span><h3>My profile</h3><p>Update your information</p></span>
+
+            <button
+              className="service-card"
+              onClick={() => navigate('/profile')}
+            >
+              <span className="service-icon">
+                <Icon name="user" size={18} />
+              </span>
+
+              <span>
+                <h3>My profile</h3>
+                <p>Update your information</p>
+              </span>
             </button>
           </section>
 
+          {/* Recent applications */}
           <div className="section-heading">
             <div>
               <h2>Recent applications</h2>
               <p>Your latest submissions</p>
             </div>
-            <button className="section-link" onClick={() => navigate('/track')}>
-              View all <Icon name="arrow" size={14} />
+
+            <button
+              className="section-link"
+              onClick={() => navigate('/track')}
+            >
+              View all
+              <Icon name="arrow" size={14} />
             </button>
           </div>
 
@@ -232,34 +502,59 @@ const CitizenDashboard = () => {
             <article className="panel">
               <div className="panel-header">
                 <h2>Applications</h2>
-                <p>{applications.length} total · {active} active · {completed} completed</p>
+
+                <p>
+                  {applications.length} total · {active} active · {completed} completed
+                </p>
               </div>
+
               <div className="activity-list">
                 {visible.length === 0 ? (
-                  <div className="empty">No applications yet.</div>
+                  <div className="empty">
+                    No applications yet.
+                  </div>
                 ) : (
                   visible.map((app) => (
-                    <div className="activity-row" key={app.id}>
+                    <div
+                      className="activity-row"
+                      key={app.id}
+                    >
                       <div className="activity-info">
-                        <span className="activity-icon"><Icon name="document" size={16} /></span>
+                        <span className="activity-icon">
+                          <Icon name="document" size={16} />
+                        </span>
+
                         <div>
-                          <div className="activity-name">{app.service_type}</div>
-                          <div className="activity-meta">{app.reference_number}</div>
+                          <div className="activity-name">
+                            {app.service_type || app.service_name || 'Government service'}
+                          </div>
+
+                          <div className="activity-meta">
+                            {app.reference_number || app.reference || 'No reference number'}
+                          </div>
                         </div>
                       </div>
-                      <StatusBadge status={app.status} />
+
+                      <StatusBadge status={app.status || 'pending'} />
                     </div>
                   ))
                 )}
               </div>
             </article>
           </section>
+
         </div>
       </main>
     </div>
   );
 };
 
-const layoutStyles = { layout: { display: 'flex', minHeight: '100vh', background: '#f7f9fc' } };
+const layoutStyles = {
+  layout: {
+    display: 'flex',
+    minHeight: '100vh',
+    background: '#f7f9fc'
+  }
+};
 
 export default CitizenDashboard;

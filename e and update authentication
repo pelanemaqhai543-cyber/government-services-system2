@@ -1,0 +1,220 @@
+[1mdiff --git a/backend/config/db.js b/backend/config/db.js[m
+[1mindex 4205220..6af61a1 100644[m
+[1m--- a/backend/config/db.js[m
+[1m+++ b/backend/config/db.js[m
+[36m@@ -1,60 +1,55 @@[m
+[32m+[m
+ const mysql = require('mysql2');[m
+ require('dotenv').config();[m
+ [m
+[31m-const requiredEnv = ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME'];[m
+[31m-[m
+[31m-const missingEnv = requiredEnv.filter([m
+[31m-  (key) => process.env[key] === undefined[m
+[31m-);[m
+[32m+[m[32mconst requiredVariables = [[m
+[32m+[m[32m  'DB_HOST',[m
+[32m+[m[32m  'DB_USER',[m
+[32m+[m[32m  'DB_PASSWORD',[m
+[32m+[m[32m  'DB_NAME'[m
+[32m+[m[32m];[m
+ [m
+[31m-if (missingEnv.length > 0) {[m
+[31m-  throw new Error([m
+[31m-    `Missing database environment variables: ${missingEnv.join(', ')}`[m
+[31m-  );[m
+[32m+[m[32mfor (const variable of requiredVariables) {[m
+[32m+[m[32m  if (!process.env[variable]) {[m
+[32m+[m[32m    throw new Error(`Missing database environment variable: ${variable}`);[m
+[32m+[m[32m  }[m
+ }[m
+ [m
+[31m-const isCloudDB =[m
+[31m-  process.env.DB_HOST.includes('rlwy') ||[m
+[31m-  process.env.DB_HOST.includes('railway') ||[m
+[31m-  process.env.DB_HOST.includes('planetscale') ||[m
+[31m-  process.env.DB_HOST.includes('aiven') ||[m
+[31m-  process.env.DB_HOST.includes('clever-cloud') ||[m
+[31m-  process.env.NODE_ENV === 'production';[m
+[31m-[m
+ const poolConfig = {[m
+   host: process.env.DB_HOST,[m
+   port: Number(process.env.DB_PORT || 3306),[m
+   user: process.env.DB_USER,[m
+   password: process.env.DB_PASSWORD,[m
+   database: process.env.DB_NAME,[m
+[32m+[m
+   waitForConnections: true,[m
+   connectionLimit: 10,[m
+   queueLimit: 0,[m
+[31m-  [m
+[31m-  // 👇 THIS IS THE FIX: Forces the connection to stay open[m
+[31m-  enableKeepAlive: true,[m
+[31m-  keepAliveInitialDelay: 10000 [m
+[31m-};[m
+[32m+[m[32m  connectTimeout: 15000,[m
+ [m
+[31m-if (isCloudDB) {[m
+[31m-  poolConfig.ssl = { rejectUnauthorized: false };[m
+[31m-}[m
+[32m+[m[32m  // Aiven requires encrypted database connections.[m
+[32m+[m[32m  ssl: {[m
+[32m+[m[32m    rejectUnauthorized: false[m
+[32m+[m[32m  }[m
+[32m+[m[32m};[m
+ [m
+ const pool = mysql.createPool(poolConfig);[m
+ const promisePool = pool.promise();[m
+ [m
+[31m-// Test connection on startup[m
+[32m+[m[32m// Verify the connection without stopping the application[m
+[32m+[m[32m// before the database is available.[m
+ promisePool.getConnection()[m
+[31m-  .then((connection) => {[m
+[31m-    console.log('MySQL connected successfully');[m
+[31m-    console.log(`Host: ${process.env.DB_HOST}`);[m
+[31m-    console.log(`Port: ${process.env.DB_PORT || 3306}`);[m
+[31m-    console.log(`Database: ${process.env.DB_NAME}`);[m
+[31m-    console.log(`SSL: ${isCloudDB ? 'enabled' : 'disabled'}`);[m
+[32m+[m[32m  .then(connection => {[m
+[32m+[m[32m    console.log('✅ MySQL connected successfully.');[m
+[32m+[m[32m    console.log(`   Host: ${process.env.DB_HOST}`);[m
+[32m+[m[32m    console.log(`   Port: ${process.env.DB_PORT || 3306}`);[m
+[32m+[m[32m    console.log(`   Database: ${process.env.DB_NAME}`);[m
+[32m+[m[32m    console.log('   SSL: enabled');[m
+[32m+[m
+     connection.release();[m
+   })[m
+[31m-  .catch((error) => {[m
+[31m-    console.error('MySQL connection error:', error.message);[m
+[32m+[m[32m  .catch(error => {[m
+[32m+[m[32m    console.error('❌ MySQL connection error:', error.message);[m
+   });[m
+ [m
+ const db = {[m
+[36m@@ -70,7 +65,7 @@[m [mconst db = {[m
+ [m
+   getConnection: () => promisePool.getConnection(),[m
+ [m
+[31m-  close: () => promisePool.end(),[m
+[32m+[m[32m  end: () => promisePool.end()[m
+ };[m
+ [m
+[31m-module.exports = db;[m
+\ No newline at end of file[m
+[32m+[m[32mmodule.exports = db;[m
+[1mdiff --git a/backend/controllers/authController.js b/backend/controllers/authController.js[m
+[1mindex df984a9..af633be 100644[m
+[1m--- a/backend/controllers/authController.js[m
+[1m+++ b/backend/controllers/authController.js[m
+[36m@@ -1,3 +1,4 @@[m
+[32m+[m
+ const bcrypt = require('bcryptjs');[m
+ const jwt = require('jsonwebtoken');[m
+ const db = require('../config/db');[m
+[36m@@ -9,7 +10,7 @@[m [mconst EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;[m
+ [m
+ function createToken(user) {[m
+   if (!process.env.JWT_SECRET) {[m
+[31m-    throw new Error('JWT_SECRET is not configured in the backend .env file.');[m
+[32m+[m[32m    throw new Error('JWT_SECRET is not configured in the backend environment.');[m
+   }[m
+ [m
+   return jwt.sign([m
+[36m@@ -26,11 +27,22 @@[m [mfunction createToken(user) {[m
+ }[m
+ [m
+ function isDatabaseUnavailable(err) {[m
+[31m-  return ['ECONNREFUSED', 'ETIMEDOUT', 'PROTOCOL_CONNECTION_LOST'].includes([m
+[31m-    err.code[m
+[31m-  );[m
+[32m+[m[32m  const unavailableCodes = [[m
+[32m+[m[32m    'ECONNREFUSED',[m
+[32m+[m[32m    'ETIMEDOUT',[m
+[32m+[m[32m    'PROTOCOL_CONNECTION_LOST',[m
+[32m+[m[32m    'ECONNRESET',[m
+[32m+[m[32m    'ENOTFOUND',[m
+[32m+[m[32m    'ER_ACCESS_DENIED_ERROR',[m
+[32m+[m[32m    'ER_BAD_DB_ERROR'[m
+[32m+[m[32m  ];[m
+[32m+[m
+[32m+[m[32m  return unavailableCodes.includes(err.code);[m
+ }[m
+ [m
+[32m+[m[32m// ==========================================[m
+[32m+[m[32m// REGISTER[m
+[32m+[m[32m// ==========================================[m
+ exports.register = async (req, res) => {[m
+   const {[m
+     account_type,[m
+[36m@@ -44,13 +56,19 @@[m [mexports.register = async (req, res) => {[m
+     password[m
+   } = req.body;[m
+ [m
+[31m-  if (!full_name || typeof full_name !== 'string' || full_name.trim().length < 2) {[m
+[32m+[m[32m  // Validate full name[m
+[32m+[m[32m  if ([m
+[32m+[m[32m    !full_name ||[m
+[32m+[m[32m    typeof full_name !== 'string' ||[m
+[32m+[m[32m    full_name.trim().length < 2[m
+[32m+[m[32m  ) {[m
+     return res.status(400).json({[m
+       error: 'INVALID_NAME',[m
+       message: 'Please enter your full name.'[m
+     });[m
+   }[m
+ [m
+[32m+[m[32m  // Validate date of birth[m
+   if (!date_of_birth) {[m
+     return res.status(400).json({[m
+       error: 'MISSING_DOB',[m
+[36m@@ -58,6 +76,7 @@[m [mexports.register = async (req, res) => {[m
+     });[m
+   }[m
+ [m
+[32m+[m[32m  // Validate gender[m
+   if (!gender || !['Male', 'Female', 'Other'].includes(gender)) {[m
+     return res.status(400).json({[m
+       error: 'INVALID_GENDER',[m
+[36m@@ -65,6 +84,7 @@[m [mexports.register = async (req, res) => {[m
+     });[m
+   }[m
+ [m
+[32m+[m[32m  // Validate password[m
+   if (typeof password !== 'string' || password.length < 6) {[m
+     return res.status(400).json({[m
+       error: 'WEAK_PASSWORD',[m
+[36m@@ -72,7 +92,8 @@[m [mexports.register = async (req, res) => {[m
+     });[m
+   }[m
+ [m
+[31m-  if (email && !EMAIL_REGEX.test(email)) {[m
+[32m+[m[32m  // Validate email when provided[m
+[32m+[m[32m  if (email && !EMAIL_REGEX.test(String(email).trim())) {[m
+     return res.status(400).json({[m
+       error: 'INVALID_EMAIL',[m
+       message: 'Please enter a valid email address.'[m
+[36m@@ -80,10 +101,20 @@[m [mexports.register = async (req, res) => {[m
+   }[m
+ [m
+   const type = account_type === 'youth' ? 'youth' : 'adult';[m
+[31m-  const normalizedEmail = email ? email.trim().toLowerCase() : null;[m
+[31m-  const normalizedUsername = username ? String(username).trim() : null;[m
+[31m-  const normalizedNationalId = national_id ? String(national_id).trim() : null;[m
+ [m
+[32m+[m[32m  const normalizedEmail = email[m
+[32m+[m[32m    ? String(email).trim().toLowerCase()[m
+[32m+[m[32m    : null;[m
+[32m+[m
+[32m+[m[32m  const normalizedUsername = username[m
+[32m+[m[32m    ? String(username).trim()[m
+[32m+[m[32m    : null;[m
+[32m+[m
+[32m+[m[32m  const normalizedNationalId = national_id[m
+[32m+[m[32m    ? String(national_id).trim()[m
+[32m+[m[32m    : null;[m
+[32m+[m
+[32m+[m[32m  // Adult account validation[m
+   if (type === 'adult') {[m
+     if (!normalizedNationalId) {[m
+   

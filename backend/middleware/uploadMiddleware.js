@@ -2,7 +2,12 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-const uploadDirectory = path.join(__dirname, '..', 'uploads', 'requests');
+const uploadDirectory = path.join(
+  __dirname,
+  '..',
+  'uploads',
+  'requests'
+);
 
 fs.mkdirSync(uploadDirectory, { recursive: true });
 
@@ -13,15 +18,16 @@ const storage = multer.diskStorage({
 
   filename: (req, file, callback) => {
     const extension = path.extname(file.originalname).toLowerCase();
+
     const safeName = path
       .basename(file.originalname, extension)
       .replace(/[^a-zA-Z0-9_-]/g, '_')
       .slice(0, 80);
 
-    callback(
-      null,
-      `${Date.now()}-${Math.round(Math.random() * 1e9)}-${safeName}${extension}`
-    );
+    const uniqueName =
+      `${Date.now()}-${Math.round(Math.random() * 1e9)}-${safeName}${extension}`;
+
+    callback(null, uniqueName);
   }
 });
 

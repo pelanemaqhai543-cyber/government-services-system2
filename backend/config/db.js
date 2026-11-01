@@ -22,12 +22,17 @@ const poolConfig = {
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
 
+  // Connection pool settings
   waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  connectTimeout: 15000,
+  connectionLimit: 5,
+  maxIdle: 5,
+  idleTimeout: 60000,
+  queueLimit: 50,
 
-  // Aiven requires encrypted database connections.
+  // Connection timeout
+  connectTimeout: 30000,
+
+  // Aiven SSL
   ssl: {
     rejectUnauthorized: false
   }
@@ -36,21 +41,29 @@ const poolConfig = {
 const pool = mysql.createPool(poolConfig);
 const promisePool = pool.promise();
 
-// Verify the connection without stopping the application
-// before the database is available.
-promisePool.getConnection()
-  .then(connection => {
+// Test database connection without crashing the server
+async function checkDatabaseConnection() {
+  let connection;
+
+  try {
+    connection = await promisePool.getConnection();
+
     console.log('✅ MySQL connected successfully.');
     console.log(`   Host: ${process.env.DB_HOST}`);
     console.log(`   Port: ${process.env.DB_PORT || 3306}`);
     console.log(`   Database: ${process.env.DB_NAME}`);
     console.log('   SSL: enabled');
 
-    connection.release();
-  })
-  .catch(error => {
+  } catch (error) {
     console.error('❌ MySQL connection error:', error.message);
-  });
+  } finally {
+    if (connection) {
+      connection.release();
+    }
+  }
+}
+
+checkDatabaseConnection();
 
 const db = {
   query: async (sql, params = []) => {
