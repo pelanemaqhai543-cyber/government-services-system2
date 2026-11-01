@@ -1,3 +1,4 @@
+
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const db = require('../config/db');
@@ -9,7 +10,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function createToken(user) {
   if (!process.env.JWT_SECRET) {
-    throw new Error('JWT_SECRET is not configured in the backend .env file.');
+    throw new Error('JWT_SECRET is not configured in the backend environment.');
   }
 
   return jwt.sign(
@@ -26,11 +27,22 @@ function createToken(user) {
 }
 
 function isDatabaseUnavailable(err) {
-  return ['ECONNREFUSED', 'ETIMEDOUT', 'PROTOCOL_CONNECTION_LOST'].includes(
-    err.code
-  );
+  const unavailableCodes = [
+    'ECONNREFUSED',
+    'ETIMEDOUT',
+    'PROTOCOL_CONNECTION_LOST',
+    'ECONNRESET',
+    'ENOTFOUND',
+    'ER_ACCESS_DENIED_ERROR',
+    'ER_BAD_DB_ERROR'
+  ];
+
+  return unavailableCodes.includes(err.code);
 }
 
+// ==========================================
+// REGISTER
+// ==========================================
 exports.register = async (req, res) => {
   const {
     account_type,
@@ -44,13 +56,19 @@ exports.register = async (req, res) => {
     password
   } = req.body;
 
-  if (!full_name || typeof full_name !== 'string' || full_name.trim().length < 2) {
+  // Validate full name
+  if (
+    !full_name ||
+    typeof full_name !== 'string' ||
+    full_name.trim().length < 2
+  ) {
     return res.status(400).json({
       error: 'INVALID_NAME',
       message: 'Please enter your full name.'
     });
   }
 
+  // Validate date of birth
   if (!date_of_birth) {
     return res.status(400).json({
       error: 'MISSING_DOB',
@@ -58,6 +76,7 @@ exports.register = async (req, res) => {
     });
   }
 
+  // Validate gender
   if (!gender || !['Male', 'Female', 'Other'].includes(gender)) {
     return res.status(400).json({
       error: 'INVALID_GENDER',
@@ -65,6 +84,7 @@ exports.register = async (req, res) => {
     });
   }
 
+  // Validate password
   if (typeof password !== 'string' || password.length < 6) {
     return res.status(400).json({
       error: 'WEAK_PASSWORD',
@@ -72,7 +92,8 @@ exports.register = async (req, res) => {
     });
   }
 
-  if (email && !EMAIL_REGEX.test(email)) {
+  // Validate email when provided
+  if (email && !EMAIL_REGEX.test(String(email).trim())) {
     return res.status(400).json({
       error: 'INVALID_EMAIL',
       message: 'Please enter a valid email address.'
@@ -80,10 +101,20 @@ exports.register = async (req, res) => {
   }
 
   const type = account_type === 'youth' ? 'youth' : 'adult';
-  const normalizedEmail = email ? email.trim().toLowerCase() : null;
-  const normalizedUsername = username ? String(username).trim() : null;
-  const normalizedNationalId = national_id ? String(national_id).trim() : null;
 
+  const normalizedEmail = email
+    ? String(email).trim().toLowerCase()
+    : null;
+
+  const normalizedUsername = username
+    ? String(username).trim()
+    : null;
+
+  const normalizedNationalId = national_id
+    ? String(national_id).trim()
+    : null;
+
+  // Adult account validation
   if (type === 'adult') {
     if (!normalizedNationalId) {
       return res.status(400).json({
@@ -98,7 +129,10 @@ exports.register = async (req, res) => {
         message: 'National ID must be exactly 13 digits.'
       });
     }
-  } else {
+  }
+
+  // Youth account validation
+  if (type === 'youth') {
     if (!normalizedUsername) {
       return res.status(400).json({
         error: 'MISSING_USERNAME',
@@ -118,16 +152,24 @@ exports.register = async (req, res) => {
 
   try {
     connection = await db.getConnection();
+
     await connection.beginTransaction();
 
+    // ======================================
+    // ADULT REGISTRATION
+    // ======================================
     if (type === 'adult') {
       const [existing] = await connection.query(
-        'SELECT id, role, password FROM users WHERE national_id = ? LIMIT 1',
+        `SELECT id, role, password
+         FROM users
+         WHERE national_id = ?
+         LIMIT 1`,
         [normalizedNationalId]
       );
 
       if (existing.length === 0) {
         await connection.rollback();
+
         return res.status(404).json({
           error: 'ID_NOT_FOUND',
           message: 'This National ID is not registered in the system. Please apply for a National ID first.'
@@ -138,18 +180,28 @@ exports.register = async (req, res) => {
 
       if (existingUser.password && existingUser.role === 'citizen') {
         await connection.rollback();
+
         return res.status(409).json({
           error: 'DUPLICATE_ID',
           message: 'This National ID is already registered. Please log in instead.'
         });
       }
 
+      const hashedPassword = await bcrypt.hash(password, 10);
+
       await connection.query(
         `UPDATE users
-         SET password = ?, full_name = ?, email = ?, phone = ?, date_of_birth = ?, gender = ?, is_verified = TRUE, status = 'active'
+         SET password = ?,
+             full_name = ?,
+             email = ?,
+             phone = ?,
+             date_of_birth = ?,
+             gender = ?,
+             is_verified = TRUE,
+             status = 'active'
          WHERE national_id = ?`,
         [
-          await bcrypt.hash(password, 10),
+          hashedPassword,
           full_name.trim(),
           normalizedEmail,
           phone || null,
@@ -173,30 +225,54 @@ exports.register = async (req, res) => {
       };
 
       const token = createToken(user);
+
       return res.status(201).json({
         message: 'Registration successful. Welcome to MyGov!',
         token,
         user
       });
+    }
 
-    } else {
+    // ======================================
+    // YOUTH REGISTRATION
+    // ======================================
+    else {
       const [existing] = await connection.query(
-        'SELECT id FROM users WHERE username = ? LIMIT 1',
+        `SELECT id
+         FROM users
+         WHERE username = ?
+         LIMIT 1`,
         [normalizedUsername]
       );
 
-      if (existing.length) {
+      if (existing.length > 0) {
         await connection.rollback();
+
         return res.status(409).json({
           error: 'DUPLICATE_USERNAME',
           message: 'This username is already taken.'
         });
       }
 
-      const insertFields = ['username', 'password', 'full_name', 'email', 'phone', 'role', 'account_type', 'date_of_birth', 'gender', 'is_verified', 'status'];
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      const insertFields = [
+        'username',
+        'password',
+        'full_name',
+        'email',
+        'phone',
+        'role',
+        'account_type',
+        'date_of_birth',
+        'gender',
+        'is_verified',
+        'status'
+      ];
+
       const insertValues = [
         normalizedUsername,
-        await bcrypt.hash(password, 10),
+        hashedPassword,
         full_name.trim(),
         normalizedEmail,
         phone || null,
@@ -209,23 +285,31 @@ exports.register = async (req, res) => {
       ];
 
       const placeholders = insertFields.map(() => '?').join(', ');
-      const fieldList = insertFields.map(field => `\`${field}\``).join(', ');
+      const fieldList = insertFields
+        .map(field => `\`${field}\``)
+        .join(', ');
 
       const [result] = await connection.query(
-        `INSERT INTO users (${fieldList}) VALUES (${placeholders})`,
+        `INSERT INTO users (${fieldList})
+         VALUES (${placeholders})`,
         insertValues
       );
 
       const userId = result.insertId;
 
       await connection.query(
-        `INSERT INTO citizen_profiles (user_id, verification_status, verified_at) VALUES (?, 'pending', NULL)`,
+        `INSERT INTO citizen_profiles
+         (user_id, verification_status, verified_at)
+         VALUES (?, 'pending', NULL)`,
         [userId]
       );
 
       await connection.query(
         'INSERT INTO notifications (user_id, message) VALUES (?, ?)',
-        [userId, `Welcome to MyGov Lesotho, ${full_name.trim().split(' ')[0]}! Your account is ready.`]
+        [
+          userId,
+          `Welcome to MyGov Lesotho, ${full_name.trim().split(' ')[0]}! Your account is ready.`
+        ]
       );
 
       await connection.commit();
@@ -240,6 +324,7 @@ exports.register = async (req, res) => {
       };
 
       const token = createToken(user);
+
       return res.status(201).json({
         message: 'Registration successful. Welcome to MyGov!',
         token,
@@ -248,27 +333,52 @@ exports.register = async (req, res) => {
     }
   } catch (err) {
     if (connection) {
-      try { await connection.rollback(); } catch (e) {}
+      try {
+        await connection.rollback();
+      } catch (rollbackError) {
+        console.error('Registration rollback error:', rollbackError.message);
+      }
     }
 
     console.error('Registration error:', err);
 
     if (err.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ error: 'DUPLICATE_ACCOUNT', message: 'An account with these details already exists.' });
+      return res.status(409).json({
+        error: 'DUPLICATE_ACCOUNT',
+        message: 'An account with these details already exists.'
+      });
     }
+
     if (isDatabaseUnavailable(err)) {
-      return res.status(503).json({ error: 'DB_UNAVAILABLE', message: 'Service temporarily unavailable.' });
+      return res.status(503).json({
+        error: 'DB_UNAVAILABLE',
+        message: 'Service temporarily unavailable.'
+      });
     }
-    return res.status(500).json({ error: 'SERVER_ERROR', message: 'Registration failed. ' + err.message });
+
+    return res.status(500).json({
+      error: 'SERVER_ERROR',
+      message: 'Registration failed. ' + err.message
+    });
   } finally {
-    if (connection) connection.release();
+    if (connection) {
+      connection.release();
+    }
   }
 };
 
+// ==========================================
+// LOGIN
+// ==========================================
 exports.login = async (req, res) => {
   const { identifier, password } = req.body;
 
-  if (typeof identifier !== 'string' || !identifier.trim() || typeof password !== 'string' || !password) {
+  if (
+    typeof identifier !== 'string' ||
+    !identifier.trim() ||
+    typeof password !== 'string' ||
+    !password
+  ) {
     return res.status(400).json({
       error: 'MISSING_FIELDS',
       message: 'Enter your National ID, username, or email and your password.'
@@ -279,7 +389,8 @@ exports.login = async (req, res) => {
     const trimmed = identifier.trim();
 
     const [rows] = await db.query(
-      `SELECT * FROM users
+      `SELECT *
+       FROM users
        WHERE national_id = ?
           OR LOWER(username) = LOWER(?)
           OR LOWER(email) = LOWER(?)
@@ -288,21 +399,33 @@ exports.login = async (req, res) => {
     );
 
     if (rows.length === 0) {
-      return res.status(401).json({ error: 'USER_NOT_FOUND', message: 'No account found with these details.' });
+      return res.status(401).json({
+        error: 'USER_NOT_FOUND',
+        message: 'No account found with these details.'
+      });
     }
 
     const user = rows[0];
 
     if (user.status === 'deceased' || user.status === 'suspended') {
       return res.status(403).json({
-        error: user.status === 'deceased' ? 'ACCOUNT_DECEASED' : 'ACCOUNT_SUSPENDED',
+        error: user.status === 'deceased'
+          ? 'ACCOUNT_DECEASED'
+          : 'ACCOUNT_SUSPENDED',
         message: 'This account cannot currently log in. Please contact Home Affairs.'
       });
     }
 
-    const passwordMatches = await bcrypt.compare(password, user.password);
+    const passwordMatches = await bcrypt.compare(
+      password,
+      user.password
+    );
+
     if (!passwordMatches) {
-      return res.status(401).json({ error: 'INVALID_PASSWORD', message: 'Incorrect password. Please try again.' });
+      return res.status(401).json({
+        error: 'INVALID_PASSWORD',
+        message: 'Incorrect password. Please try again.'
+      });
     }
 
     const token = createToken(user);
@@ -324,9 +447,17 @@ exports.login = async (req, res) => {
     });
   } catch (err) {
     console.error('Login error:', err);
+
     if (isDatabaseUnavailable(err)) {
-      return res.status(503).json({ error: 'DB_UNAVAILABLE', message: 'Service temporarily unavailable.' });
+      return res.status(503).json({
+        error: 'DB_UNAVAILABLE',
+        message: 'Service temporarily unavailable.'
+      });
     }
-    return res.status(500).json({ error: 'SERVER_ERROR', message: 'An unexpected error occurred during login.' });
+
+    return res.status(500).json({
+      error: 'SERVER_ERROR',
+      message: 'An unexpected error occurred during login.'
+    });
   }
 };
